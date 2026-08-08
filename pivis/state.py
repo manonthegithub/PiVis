@@ -15,6 +15,7 @@ class AppState:
     has_person: bool = False
     last_greeting_at: float = 0.0
     sse_client_count: int = 0
+    latest_jpeg: bytes | None = None
 
 
 @dataclass

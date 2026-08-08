@@ -8,7 +8,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #111; color: #eee; font-family: monospace; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 1rem; }
     h1 { font-size: 1.2rem; margin-bottom: 0.75rem; letter-spacing: 0.1em; color: #0f0; }
-    #stream { width: 100%; max-width: 900px; border: 1px solid #333; }
+    #stream { width: 100%; max-width: 900px; border: 1px solid #333; display: block; }
     #status-bar { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.8rem; flex-wrap: wrap; }
     .badge { padding: 0.2rem 0.6rem; border-radius: 4px; background: #222; }
     .badge.green { background: #0a2a0a; color: #0f0; }
@@ -20,7 +20,7 @@
 </head>
 <body>
   <h1>PiVis</h1>
-  <img id="stream" src="/stream" alt="camera stream">
+  <img id="stream" alt="camera stream">
   <div id="status-bar">
     <span id="badge-person" class="badge">no person</span>
     <span id="badge-listener" class="badge">browser: connected</span>
@@ -28,9 +28,9 @@
   <div id="last-greeting"></div>
   <div id="lighting" style="margin-top:0.6rem;display:flex;gap:0.5rem;align-items:center;font-size:0.8rem;">
     <span style="color:#888">Light:</span>
-    <button onclick="setLighting('daylight')">☀ Daylight</button>
-    <button onclick="setLighting('indoor')">💡 Indoor</button>
-    <button onclick="setLighting('dim')">🌙 Dim</button>
+    <button onclick="setLighting('daylight')">&#9728; Daylight</button>
+    <button onclick="setLighting('indoor')">&#128161; Indoor</button>
+    <button onclick="setLighting('dim')">&#127769; Dim</button>
     <span id="lighting-status" style="color:#888"></span>
   </div>
   <audio id="audio-player" autoplay></audio>
@@ -40,13 +40,30 @@
     const badgeListener = document.getElementById('badge-listener');
     const lastGreeting = document.getElementById('last-greeting');
     const player = document.getElementById('audio-player');
+    const streamImg = document.getElementById('stream');
+
+    // Poll /snapshot — works on all browsers including Safari (no MJPEG)
+    let framePending = false;
+    function fetchFrame() {
+      if (framePending) return;
+      framePending = true;
+      const img = new Image();
+      img.onload = () => {
+        streamImg.src = img.src;
+        framePending = false;
+      };
+      img.onerror = () => { framePending = false; };
+      img.src = '/snapshot?t=' + Date.now();
+    }
+    setInterval(fetchFrame, 50); // ~20fps
+    fetchFrame();
 
     const evtSource = new EventSource('/events');
     evtSource.onmessage = (e) => {
       const { wav_url, text } = JSON.parse(e.data);
       player.src = wav_url;
       player.play().catch(() => {});
-      lastGreeting.textContent = `"${text}"`;
+      lastGreeting.textContent = '"' + text + '"';
     };
     evtSource.onerror = () => {
       badgeListener.textContent = 'browser: disconnected';
@@ -75,8 +92,8 @@
       const s = document.getElementById('lighting-status');
       s.textContent = 'applying...';
       try {
-        await fetch(`/settings/lighting/${preset}`, {method: 'POST'});
-        s.textContent = `✓ ${preset}`;
+        await fetch('/settings/lighting/' + preset, {method: 'POST'});
+        s.textContent = '✓ ' + preset;
       } catch(_) { s.textContent = 'failed'; }
     }
   </script>

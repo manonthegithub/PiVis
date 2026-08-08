@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from pivis.state import LIGHTING_PRESETS, AppState, Queues
 
@@ -62,6 +62,13 @@ def _attach(queues: Queues, app_state: AppState) -> None:
         if not path.exists() or not path.is_file():
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(path, media_type="audio/wav")
+
+    @router.get("/snapshot")
+    async def snapshot():
+        if app_state.latest_jpeg is None:
+            return JSONResponse({"error": "no frame yet"}, status_code=503)
+        return Response(content=app_state.latest_jpeg, media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
 
     @router.get("/status")
     async def status():

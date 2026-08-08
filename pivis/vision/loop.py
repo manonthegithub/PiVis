@@ -76,6 +76,7 @@ async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppStat
                     logger.exception("Detection error")
 
             jpeg = encode_jpeg(frame, boxes)
+            app_state.latest_jpeg = jpeg
             try:
                 queues.frames.put_nowait(jpeg)
             except asyncio.QueueFull:
