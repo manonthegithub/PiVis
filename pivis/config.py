@@ -7,7 +7,8 @@ class Settings(BaseSettings):
 
     # Camera
     stream_fps: int = 20
-    camera_resolution: tuple[int, int] = (1280, 720)
+    camera_width: int = 1280
+    camera_height: int = 720
 
     # Detection
     detection_interval_ms: int = 200

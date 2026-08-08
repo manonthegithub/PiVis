@@ -30,7 +30,7 @@ def encode_jpeg(frame: np.ndarray, boxes: list[BoundingBox]) -> bytes:
 
 
 async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppState) -> None:
-    camera = make_camera(settings.camera_resolution, settings.stream_fps)
+    camera = make_camera((settings.camera_width, settings.camera_height), settings.stream_fps)
     engine = DetectionEngine(confidence_threshold=settings.detection_confidence)
     tts = TTSEngine(settings.piper_binary, settings.tts_voice_path)
     audio = make_audio_output(settings.audio_output, settings.audio_device)
