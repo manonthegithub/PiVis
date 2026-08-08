@@ -1,1 +1,66 @@
-<html></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PiVis</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #111; color: #eee; font-family: monospace; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 1rem; }
+    h1 { font-size: 1.2rem; margin-bottom: 0.75rem; letter-spacing: 0.1em; color: #0f0; }
+    #stream { width: 100%; max-width: 900px; border: 1px solid #333; }
+    #status-bar { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.8rem; flex-wrap: wrap; }
+    .badge { padding: 0.2rem 0.6rem; border-radius: 4px; background: #222; }
+    .badge.green { background: #0a2a0a; color: #0f0; }
+    .badge.red { background: #2a0a0a; color: #f55; }
+    #last-greeting { font-style: italic; color: #aaa; margin-top: 0.4rem; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>PiVis</h1>
+  <img id="stream" src="/stream" alt="camera stream">
+  <div id="status-bar">
+    <span id="badge-person" class="badge">no person</span>
+    <span id="badge-listener" class="badge">browser: connected</span>
+  </div>
+  <div id="last-greeting"></div>
+  <audio id="audio-player" autoplay></audio>
+
+  <script>
+    const badgePerson = document.getElementById('badge-person');
+    const badgeListener = document.getElementById('badge-listener');
+    const lastGreeting = document.getElementById('last-greeting');
+    const player = document.getElementById('audio-player');
+
+    const evtSource = new EventSource('/events');
+    evtSource.onmessage = (e) => {
+      const { wav_url, text } = JSON.parse(e.data);
+      player.src = wav_url;
+      player.play().catch(() => {});
+      lastGreeting.textContent = `"${text}"`;
+    };
+    evtSource.onerror = () => {
+      badgeListener.textContent = 'browser: disconnected';
+      badgeListener.className = 'badge red';
+    };
+    evtSource.onopen = () => {
+      badgeListener.textContent = 'browser: connected';
+      badgeListener.className = 'badge green';
+    };
+
+    async function pollStatus() {
+      try {
+        const data = await fetch('/status').then(r => r.json());
+        badgePerson.textContent = data.has_person ? 'person detected' : 'no person';
+        badgePerson.className = 'badge' + (data.has_person ? ' green' : '');
+        if (data.sse_client_count === 0) {
+          badgeListener.textContent = 'no browser listener';
+          badgeListener.className = 'badge red';
+        }
+      } catch (_) {}
+    }
+    setInterval(pollStatus, 2000);
+    pollStatus();
+  </script>
+</body>
+</html>

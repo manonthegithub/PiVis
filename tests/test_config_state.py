@@ -7,7 +7,8 @@ from pivis.state import AppState, AudioEvent, Queues
 
 def test_settings_loads_with_env(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    s = Settings()
+    monkeypatch.delenv("CAMERA_RESOLUTION", raising=False)
+    s = Settings(_env_file=None)
     assert s.anthropic_api_key == "test-key"
     assert s.stream_fps == 20
     assert s.greeting_cooldown_s == 30

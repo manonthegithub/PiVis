@@ -58,9 +58,12 @@ def test_audio_served(client_ctx, tmp_path):
 
 def test_index_serves_html(client_ctx, tmp_path):
     client, _, _ = client_ctx
-    fake_html = b"<html></html>"
+    fake_html = b"<html><body>test</body></html>"
     static = Path(__file__).parent.parent / "pivis/web/static/index.html"
-    static.parent.mkdir(parents=True, exist_ok=True)
-    static.write_bytes(fake_html)
-    resp = client.get("/")
-    assert resp.status_code == 200
+    original = static.read_bytes()
+    try:
+        static.write_bytes(fake_html)
+        resp = client.get("/")
+        assert resp.status_code == 200
+    finally:
+        static.write_bytes(original)  # always restore
