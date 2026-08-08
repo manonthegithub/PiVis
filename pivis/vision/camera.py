@@ -16,9 +16,10 @@ class Camera(Protocol):
 class PiCamera:
     """picamera2-backed camera. Only works on Raspberry Pi."""
 
-    def __init__(self, resolution: tuple[int, int] = (1280, 720), fps: int = 20) -> None:
+    def __init__(self, resolution: tuple[int, int] = (1280, 720), fps: int = 20, analogue_gain: float = 4.0) -> None:
         self._resolution = resolution
         self._fps = fps
+        self._analogue_gain = analogue_gain
         self._frame: np.ndarray | None = None
         self._lock = threading.Lock()
         self._running = False
@@ -30,7 +31,13 @@ class PiCamera:
         self._cam = Picamera2()
         config = self._cam.create_video_configuration(
             main={"size": self._resolution, "format": "RGB888"},
-            controls={"FrameRate": self._fps},
+            controls={
+                "FrameRate": self._fps,
+                "AeEnable": True,
+                "AwbEnable": True,
+                "AnalogueGain": self._analogue_gain,
+                "AeExposureMode": 0,       # normal AE mode
+            },
         )
         self._cam.configure(config)
         self._cam.start()
@@ -77,7 +84,7 @@ class MockCamera:
         return np.zeros((h, w, 3), dtype=np.uint8)
 
 
-def make_camera(resolution: tuple[int, int], fps: int, mock: bool = False) -> Camera:
+def make_camera(resolution: tuple[int, int], fps: int, analogue_gain: float = 4.0, mock: bool = False) -> Camera:
     if mock:
         return MockCamera(resolution)
-    return PiCamera(resolution, fps)
+    return PiCamera(resolution, fps, analogue_gain)

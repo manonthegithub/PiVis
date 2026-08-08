@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     stream_fps: int = 20
     camera_width: int = 1280
     camera_height: int = 720
+    camera_analogue_gain: float = 4.0  # 1.0=normal, higher=more sensitive (indoor: 4-8)
 
     # Detection
     detection_interval_ms: int = 200
