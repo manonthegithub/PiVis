@@ -33,9 +33,10 @@ class DetectionEngine:
         self._threshold = confidence_threshold
         self._session = None
 
-    def load(self, model_path: Path) -> None:
+    def load(self, model_path: Path | str) -> None:
         import onnxruntime as ort
 
+        model_path = Path(model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"YOLO model not found: {model_path}")
         self._session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
