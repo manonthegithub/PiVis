@@ -2,6 +2,8 @@ docs/tmp
 .idea/
 .venv
 .env
+.ssh_key
+.ssh_key.pub
 models/
 tmp/
 __pycache__/

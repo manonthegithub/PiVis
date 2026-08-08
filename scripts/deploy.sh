@@ -4,11 +4,15 @@
 set -euo pipefail
 
 HOST="repka@192.168.8.118"
+HOST_IP="192.168.8.118"
+KEY="$(dirname "$0")/../.ssh_key"
 REMOTE_DIR="/home/repka/pivis"
 REPO="https://github.com/manonthegithub/PiVis.git"
+SSH="ssh -i $KEY -o StrictHostKeyChecking=no $HOST"
+SCP="scp -i $KEY -o StrictHostKeyChecking=no"
 
 echo "==> Pulling latest code on Pi"
-ssh -o StrictHostKeyChecking=no "$HOST" bash <<REMOTE
+$SSH bash <<REMOTE
   set -euo pipefail
   if [ -d "$REMOTE_DIR/.git" ]; then
     cd "$REMOTE_DIR" && git pull
@@ -18,7 +22,7 @@ ssh -o StrictHostKeyChecking=no "$HOST" bash <<REMOTE
 REMOTE
 
 echo "==> Installing Python deps"
-ssh "$HOST" bash <<REMOTE
+$SSH bash <<REMOTE
   set -euo pipefail
   cd "$REMOTE_DIR"
   python3 -m venv .venv
@@ -28,35 +32,26 @@ ssh "$HOST" bash <<REMOTE
 REMOTE
 
 echo "==> Downloading models (skips if already present)"
-ssh "$HOST" bash <<REMOTE
+$SSH bash <<REMOTE
   set -euo pipefail
   cd "$REMOTE_DIR"
   bash scripts/download_models.sh
 REMOTE
 
-echo "==> Checking .env"
-if ! ssh "$HOST" test -f "$REMOTE_DIR/.env"; then
-  if [ -f .env ]; then
-    echo "    Copying local .env to Pi"
-    scp .env "$HOST:$REMOTE_DIR/.env"
-  else
-    echo "    WARNING: no .env on Pi and none found locally."
-    echo "    Create $REMOTE_DIR/.env on the Pi with at least ANTHROPIC_API_KEY=..."
-    exit 1
-  fi
-fi
+echo "==> Copying .env to Pi"
+$SCP "$(dirname "$0")/../.env" "$HOST:$REMOTE_DIR/.env"
 
 echo "==> Stopping any existing pivis process"
-ssh "$HOST" "pkill -f 'python.*pivis' || true"
+$SSH "pkill -f 'python.*pivis' || true"
 sleep 1
 
-echo "==> Starting pivis (nohup, logs at $REMOTE_DIR/pivis.log)"
-ssh "$HOST" bash <<REMOTE
+echo "==> Starting pivis (logs at $REMOTE_DIR/pivis.log)"
+$SSH bash <<REMOTE
   cd "$REMOTE_DIR"
   nohup .venv/bin/python -m pivis > pivis.log 2>&1 &
-  echo "PID \$!"
+  echo "Started PID \$!"
 REMOTE
 
 echo ""
-echo "Done. Open http://192.168.8.118:8000 in your browser."
-echo "Tail logs: ssh $HOST 'tail -f $REMOTE_DIR/pivis.log'"
+echo "Done. Open http://$HOST_IP:8000"
+echo "Tail logs: ssh -i .ssh_key $HOST 'tail -f $REMOTE_DIR/pivis.log'"
