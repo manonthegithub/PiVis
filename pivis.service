@@ -4,10 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/pivis
-EnvironmentFile=/home/pi/pivis/.env
-ExecStart=/home/pi/pivis/.venv/bin/python -m pivis
+User=repka
+WorkingDirectory=/home/repka/pivis
+EnvironmentFile=/home/repka/pivis/.env
+ExecStart=/home/repka/pivis/.venv/bin/python -m pivis
 Restart=always
 RestartSec=5
 

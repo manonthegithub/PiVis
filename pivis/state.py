@@ -21,3 +21,11 @@ class AppState:
 class Queues:
     frames: asyncio.Queue[bytes] = field(default_factory=lambda: asyncio.Queue(maxsize=2))
     events: asyncio.Queue[AudioEvent] = field(default_factory=asyncio.Queue)
+    controls: asyncio.Queue[dict] = field(default_factory=asyncio.Queue)
+
+
+LIGHTING_PRESETS = {
+    "daylight": {"AnalogueGain": 1.0},
+    "indoor":   {"AnalogueGain": 4.0},
+    "dim":      {"AnalogueGain": 8.0},
+}

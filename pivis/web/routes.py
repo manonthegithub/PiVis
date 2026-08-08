@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from pivis.state import AppState, Queues
+from pivis.state import LIGHTING_PRESETS, AppState, Queues
 
 _AUDIO_DIR = Path("tmp/audio")
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -70,3 +70,10 @@ def _attach(queues: Queues, app_state: AppState) -> None:
             "last_greeting_at": app_state.last_greeting_at,
             "sse_client_count": app_state.sse_client_count,
         }
+
+    @router.post("/settings/lighting/{preset}")
+    async def set_lighting(preset: str):
+        if preset not in LIGHTING_PRESETS:
+            return JSONResponse({"error": f"unknown preset, use: {list(LIGHTING_PRESETS)}"}, status_code=400)
+        await queues.controls.put(LIGHTING_PRESETS[preset])
+        return {"preset": preset, "controls": LIGHTING_PRESETS[preset]}

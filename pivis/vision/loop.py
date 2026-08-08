@@ -55,6 +55,13 @@ async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppStat
                 await asyncio.sleep(0.05)
                 continue
 
+            # apply any pending camera control changes (e.g. lighting preset)
+            while not queues.controls.empty():
+                try:
+                    camera.set_controls(queues.controls.get_nowait())
+                except Exception:
+                    logger.exception("Failed to apply camera controls")
+
             now = time.monotonic()
             boxes = []
 

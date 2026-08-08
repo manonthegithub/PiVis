@@ -11,6 +11,7 @@ class Camera(Protocol):
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def get_frame(self) -> np.ndarray | None: ...
+    def set_controls(self, controls: dict) -> None: ...
 
 
 class PiCamera:
@@ -57,6 +58,11 @@ class PiCamera:
         with self._lock:
             return self._frame.copy() if self._frame is not None else None
 
+    def set_controls(self, controls: dict) -> None:
+        if hasattr(self, "_cam"):
+            self._cam.set_controls(controls)
+            logger.info("Camera controls updated: %s", controls)
+
     def _capture_loop(self) -> None:
         while self._running:
             try:
@@ -82,6 +88,9 @@ class MockCamera:
     def get_frame(self) -> np.ndarray:
         h, w = self._resolution[1], self._resolution[0]
         return np.zeros((h, w, 3), dtype=np.uint8)
+
+    def set_controls(self, controls: dict) -> None:
+        pass
 
 
 def make_camera(resolution: tuple[int, int], fps: int, analogue_gain: float = 4.0, mock: bool = False) -> Camera:

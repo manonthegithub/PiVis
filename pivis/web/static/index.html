@@ -14,6 +14,8 @@
     .badge.green { background: #0a2a0a; color: #0f0; }
     .badge.red { background: #2a0a0a; color: #f55; }
     #last-greeting { font-style: italic; color: #aaa; margin-top: 0.4rem; font-size: 0.85rem; }
+    button { background: #222; color: #eee; border: 1px solid #444; padding: 0.2rem 0.6rem; border-radius: 4px; cursor: pointer; font-family: monospace; }
+    button:hover { background: #333; }
   </style>
 </head>
 <body>
@@ -24,6 +26,13 @@
     <span id="badge-listener" class="badge">browser: connected</span>
   </div>
   <div id="last-greeting"></div>
+  <div id="lighting" style="margin-top:0.6rem;display:flex;gap:0.5rem;align-items:center;font-size:0.8rem;">
+    <span style="color:#888">Light:</span>
+    <button onclick="setLighting('daylight')">☀ Daylight</button>
+    <button onclick="setLighting('indoor')">💡 Indoor</button>
+    <button onclick="setLighting('dim')">🌙 Dim</button>
+    <span id="lighting-status" style="color:#888"></span>
+  </div>
   <audio id="audio-player" autoplay></audio>
 
   <script>
@@ -61,6 +70,15 @@
     }
     setInterval(pollStatus, 2000);
     pollStatus();
+
+    async function setLighting(preset) {
+      const s = document.getElementById('lighting-status');
+      s.textContent = 'applying...';
+      try {
+        await fetch(`/settings/lighting/${preset}`, {method: 'POST'});
+        s.textContent = `✓ ${preset}`;
+      } catch(_) { s.textContent = 'failed'; }
+    }
   </script>
 </body>
 </html>
