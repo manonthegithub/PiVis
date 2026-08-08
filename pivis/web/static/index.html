@@ -26,12 +26,15 @@
     <span id="badge-listener" class="badge">browser: connected</span>
   </div>
   <div id="last-greeting"></div>
-  <div id="lighting" style="margin-top:0.6rem;display:flex;gap:0.5rem;align-items:center;font-size:0.8rem;">
-    <span style="color:#888">Light:</span>
-    <button onclick="setLighting('daylight')">&#9728; Daylight</button>
-    <button onclick="setLighting('indoor')">&#128161; Indoor</button>
-    <button onclick="setLighting('dim')">&#127769; Dim</button>
-    <span id="lighting-status" style="color:#888"></span>
+  <div style="margin-top:0.6rem;display:flex;gap:1rem;align-items:center;font-size:0.8rem;flex-wrap:wrap;">
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <span style="color:#888">Light:</span>
+      <button onclick="setLighting('daylight')">&#9728; Daylight</button>
+      <button onclick="setLighting('indoor')">&#128161; Indoor</button>
+      <button onclick="setLighting('dim')">&#127769; Dim</button>
+      <span id="lighting-status" style="color:#888"></span>
+    </div>
+    <button id="btn-side" onclick="toggleSide()">&#9974; Side-by-side</button>
   </div>
   <audio id="audio-player" autoplay></audio>
 
@@ -44,6 +47,13 @@
 
     // Poll /snapshot — works on all browsers including Safari (no MJPEG)
     let framePending = false;
+    let sideView = false;
+
+    function toggleSide() {
+      sideView = !sideView;
+      document.getElementById('btn-side').textContent = sideView ? '&#9974; Annotated only' : '&#9974; Side-by-side';
+    }
+
     function fetchFrame() {
       if (framePending) return;
       framePending = true;
@@ -53,7 +63,7 @@
         framePending = false;
       };
       img.onerror = () => { framePending = false; };
-      img.src = '/snapshot?t=' + Date.now();
+      img.src = '/snapshot?' + (sideView ? 'side=1&' : '') + 't=' + Date.now();
     }
     setInterval(fetchFrame, 50); // ~20fps
     fetchFrame();

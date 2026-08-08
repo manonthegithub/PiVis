@@ -9,18 +9,16 @@ def _blank_frame(h=480, w=640):
 
 
 def test_encode_jpeg_no_boxes():
-    frame = _blank_frame()
-    result = encode_jpeg(frame, [])
-    assert isinstance(result, bytes)
-    assert result[:2] == b"\xff\xd8"  # JPEG magic
+    ann, side = encode_jpeg(_blank_frame(), [])
+    assert ann[:2] == b"\xff\xd8"
+    assert side[:2] == b"\xff\xd8"
 
 
 def test_encode_jpeg_with_boxes():
-    frame = _blank_frame()
     boxes = [BoundingBox(0.1, 0.1, 0.5, 0.5, 0.9)]
-    result = encode_jpeg(frame, boxes)
-    assert isinstance(result, bytes)
-    assert len(result) > 0
+    ann, side = encode_jpeg(_blank_frame(), boxes)
+    assert len(ann) > 0
+    assert len(side) > 0
 
 
 def test_encode_jpeg_does_not_mutate_frame():
@@ -31,8 +29,14 @@ def test_encode_jpeg_does_not_mutate_frame():
 
 
 def test_encode_jpeg_clips_boxes_to_frame():
-    frame = _blank_frame()
     # Box extends beyond frame bounds — should not crash
-    boxes = [BoundingBox(-0.1, -0.1, 1.5, 1.5, 0.9)]
-    result = encode_jpeg(frame, boxes)
-    assert result[:2] == b"\xff\xd8"
+    ann, _ = encode_jpeg(_blank_frame(), [BoundingBox(-0.1, -0.1, 1.5, 1.5, 0.9)])
+    assert ann[:2] == b"\xff\xd8"
+
+
+def test_encode_jpeg_side_is_wider():
+    ann, side = encode_jpeg(_blank_frame(480, 640), [])
+    import cv2
+    ann_w = cv2.imdecode(np.frombuffer(ann, np.uint8), cv2.IMREAD_COLOR).shape[1]
+    side_w = cv2.imdecode(np.frombuffer(side, np.uint8), cv2.IMREAD_COLOR).shape[1]
+    assert side_w == ann_w * 2

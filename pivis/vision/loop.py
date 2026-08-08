@@ -17,16 +17,18 @@ from pivis.vision.tts import TTSEngine
 logger = logging.getLogger(__name__)
 
 
-def encode_jpeg(frame: np.ndarray, boxes: list[BoundingBox]) -> bytes:
-    """Draw bounding boxes on a copy and encode to JPEG bytes."""
+def encode_jpeg(frame: np.ndarray, boxes: list[BoundingBox]) -> tuple[bytes, bytes]:
+    """Returns (annotated_jpeg, side_by_side_jpeg). Does not mutate frame."""
     h, w = frame.shape[:2]
-    out = frame.copy()
+    raw_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    ann_bgr = raw_bgr.copy()
     for box in boxes:
         x1, y1 = int(box.x1 * w), int(box.y1 * h)
         x2, y2 = int(box.x2 * w), int(box.y2 * h)
-        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    _, buf = cv2.imencode(".jpg", cv2.cvtColor(out, cv2.COLOR_RGB2BGR))
-    return buf.tobytes()
+        cv2.rectangle(ann_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    _, ann_buf = cv2.imencode(".jpg", ann_bgr)
+    _, side_buf = cv2.imencode(".jpg", np.concatenate([raw_bgr, ann_bgr], axis=1))
+    return ann_buf.tobytes(), side_buf.tobytes()
 
 
 async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppState) -> None:
@@ -75,8 +77,9 @@ async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppStat
                 except Exception:
                     logger.exception("Detection error")
 
-            jpeg = encode_jpeg(frame, boxes)
+            jpeg, side_jpeg = encode_jpeg(frame, boxes)
             app_state.latest_jpeg = jpeg
+            app_state.latest_side_jpeg = side_jpeg
             try:
                 queues.frames.put_nowait(jpeg)
             except asyncio.QueueFull:

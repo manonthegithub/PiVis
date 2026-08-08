@@ -16,6 +16,7 @@ class AppState:
     last_greeting_at: float = 0.0
     sse_client_count: int = 0
     latest_jpeg: bytes | None = None
+    latest_side_jpeg: bytes | None = None
 
 
 @dataclass

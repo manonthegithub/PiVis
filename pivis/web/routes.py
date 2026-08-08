@@ -64,10 +64,11 @@ def _attach(queues: Queues, app_state: AppState) -> None:
         return FileResponse(path, media_type="audio/wav")
 
     @router.get("/snapshot")
-    async def snapshot():
-        if app_state.latest_jpeg is None:
+    async def snapshot(side: bool = False):
+        jpeg = app_state.latest_side_jpeg if side else app_state.latest_jpeg
+        if jpeg is None:
             return JSONResponse({"error": "no frame yet"}, status_code=503)
-        return Response(content=app_state.latest_jpeg, media_type="image/jpeg",
+        return Response(content=jpeg, media_type="image/jpeg",
                         headers={"Cache-Control": "no-store"})
 
     @router.get("/status")
