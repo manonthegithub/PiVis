@@ -1,0 +1,15 @@
+[Unit]
+Description=PiVis — camera streaming + people detection + greeting
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/pivis
+EnvironmentFile=/home/pi/pivis/.env
+ExecStart=/home/pi/pivis/.venv/bin/python -m pivis
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
