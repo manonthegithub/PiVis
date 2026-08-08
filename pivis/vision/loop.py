@@ -64,7 +64,7 @@ async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppStat
                     result = await asyncio.get_event_loop().run_in_executor(None, engine.detect, frame)
                     boxes = result.boxes
                     app_state.has_person = result.has_person
-                    asyncio.create_task(orchestrator.on_detection(result))
+                    asyncio.create_task(orchestrator.on_detection(result, frame))
                 except Exception:
                     logger.exception("Detection error")
 
