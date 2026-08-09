@@ -37,7 +37,6 @@ def _attach(queues: Queues, app_state: AppState) -> None:
     async def events():
         async def _sse():
             app_state.sse_client_count += 1
-            stream_start_sent = False
             try:
                 while True:
                     # Wait for whichever queue has data first
@@ -62,13 +61,6 @@ def _attach(queues: Queues, app_state: AppState) -> None:
                             data = json.dumps({"wav_url": item.wav_url, "text": item.text})
                             yield f"event: audio\ndata: {data}\n\n"
                         elif isinstance(item, DetectionEvent):
-                            if not stream_start_sent:
-                                start_data = json.dumps({
-                                    "sensor_timestamp_ns": item.sensor_timestamp_ns,
-                                    "pts_seconds": 0.0,
-                                })
-                                yield f"event: stream_start\ndata: {start_data}\n\n"
-                                stream_start_sent = True
                             det_data = json.dumps({
                                 "boxes": item.boxes,
                                 "has_person": item.has_person,

@@ -52,14 +52,31 @@
     const player        = document.getElementById('audio-player');
 
     // --- MediaSource / WebSocket stream ---
+    // The stream's PTS base is arbitrary (ffmpeg wall-clock, starts at ~hundreds
+    // of seconds), so we can't assume playback begins at 0 — we seek to the live
+    // buffered edge whenever the playhead is outside the buffered range.
     const ms = new MediaSource();
     video.src = URL.createObjectURL(ms);
     let sb, sbQueue = [], sbBusy = false;
 
+    function syncToLiveEdge() {
+      if (!sb || !sb.buffered.length) return;
+      const start = sb.buffered.start(0), end = sb.buffered.end(0);
+      // Seek if playhead is outside buffered range or lagging >3s behind live.
+      if (video.currentTime < start || video.currentTime > end + 0.5 || end - video.currentTime > 3) {
+        try { video.currentTime = Math.max(start, end - 0.5); } catch (_) {}
+      }
+      if (video.paused) video.play().catch(() => {});
+    }
+
     function sbDrain() {
       if (sbBusy || !sbQueue.length || !sb || sb.updating) return;
       sbBusy = true;
-      sb.addEventListener('updateend', () => { sbBusy = false; sbDrain(); }, { once: true });
+      sb.addEventListener('updateend', () => {
+        sbBusy = false;
+        syncToLiveEdge();
+        sbDrain();
+      }, { once: true });
       try { sb.appendBuffer(sbQueue.shift()); } catch(e) { console.error('appendBuffer:', e); sbBusy = false; }
     }
 
@@ -75,17 +92,19 @@
       sb.addEventListener('error', e => console.error('SourceBuffer error:', e));
       // Drain any data that arrived before sourceopen fired
       sbDrain();
-      // Buffer eviction every 30s
+      // Evict old buffered data every 10s to bound memory / keep latency low
       setInterval(() => {
         if (!sb || sb.updating || !sb.buffered.length) return;
-        const end = sb.buffered.end(0);
-        if (end > 60) {
-          try { sb.remove(0, end - 60); } catch(_) {}
+        const end = sb.buffered.end(0), start = sb.buffered.start(0);
+        if (end - start > 30) {
+          try { sb.remove(start, end - 10); } catch(_) {}
         }
-      }, 30_000);
+      }, 10_000);
     });
     ms.addEventListener('error', e => console.error('MediaSource error:', e));
     video.addEventListener('error', e => console.error('Video error:', video.error?.message, e));
+    // If the browser stalls (waiting), nudge back to the live edge.
+    video.addEventListener('waiting', syncToLiveEdge);
 
     let ws;
     function connectStream() {
@@ -99,9 +118,6 @@
         // Always queue — sbDrain guards against !sb (before sourceopen)
         sbQueue.push(e.data);
         sbDrain();
-        if (video.paused && video.readyState >= 2) {
-          video.play().catch(() => {});
-        }
       };
       ws.onclose = () => {
         badgeStream.textContent = 'stream: reconnecting';
@@ -111,9 +127,10 @@
     }
     connectStream();
 
-    // --- Detection overlay with frame-accurate sync ---
-    let startTs = null;   // sensor_timestamp_ns from stream_start event
-    const pending = [];   // {pts, boxes, has_person} waiting for their frame
+    // --- Detection overlay ---
+    // The video PTS clock and the sensor-timestamp clock have different origins,
+    // so we draw the latest detection immediately (≈150ms behind the frame) and
+    // fade it out when detections stop, rather than trying to PTS-match.
     let lastBoxTime = 0;
 
     function drawBoxes(boxes) {
@@ -139,17 +156,9 @@
     });
     ro.observe(video);
 
-    // Render loop: draw boxes when video.currentTime reaches their mapped PTS
+    // Clear stale boxes 600ms after the last detection
     function render() {
-      const t = video.currentTime;
-      let drawn = false;
-      while (pending.length && pending[0].pts <= t) {
-        const d = pending.shift();
-        drawBoxes(d.boxes);
-        drawn = true;
-      }
-      // Fade boxes after 500ms with no new detection
-      if (!drawn && performance.now() - lastBoxTime > 500) {
+      if (performance.now() - lastBoxTime > 600) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
       requestAnimationFrame(render);
@@ -158,21 +167,11 @@
 
     // --- SSE ---
     const sse = new EventSource('/events');
-    sse.addEventListener('stream_start', e => {
-      const d = JSON.parse(e.data);
-      startTs = d.sensor_timestamp_ns;
-    });
     sse.addEventListener('detection', e => {
       const d = JSON.parse(e.data);
       badgePerson.textContent = d.has_person ? 'person detected' : 'no person';
       badgePerson.className = 'badge' + (d.has_person ? ' green' : '');
-      if (startTs !== null) {
-        d.pts = (d.sensor_timestamp_ns - startTs) / 1e9;
-        pending.push(d);
-        // Evict stale pending entries older than 2s
-        const cutoff = video.currentTime - 2;
-        while (pending.length && pending[0].pts < cutoff) pending.shift();
-      }
+      if (d.has_person && d.boxes.length) drawBoxes(d.boxes);
     });
     sse.addEventListener('audio', e => {
       const { wav_url, text } = JSON.parse(e.data);
