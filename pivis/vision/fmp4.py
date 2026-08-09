@@ -6,9 +6,11 @@ logger = logging.getLogger(__name__)
 def _build_ffmpeg_cmd(fps: int = 20) -> list[str]:
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
-        # genpts: generate missing PTS so mp4 muxer gets proper timestamps
-        # r: nominal fps for PTS spacing
-        "-fflags", "+genpts", "-r", str(fps), "-f", "h264", "-i", "pipe:0",
+        # use_wallclock_as_timestamps: stamp each packet with real wall clock so
+        # the MP4 muxer always receives valid, monotonically-increasing PTS from
+        # raw H264 pipe input (which carries no timing in the bitstream).
+        "-use_wallclock_as_timestamps", "1",
+        "-r", str(fps), "-f", "h264", "-i", "pipe:0",
         "-c:v", "copy",
         "-f", "mp4",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset",
