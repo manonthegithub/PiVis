@@ -192,29 +192,42 @@
       badgePerson.className = 'badge' + (d.has_person ? ' green' : '');
       if (d.has_person && d.boxes.length) drawBoxes(d.boxes);
     });
-    // Browsers block audio playback until a user gesture. Unlock on first click.
-    let audioUnlocked = false;
+    // Browsers block audio until a user gesture. Prime the element with a short
+    // silent WAV inside the click so later greeting playback is allowed.
+    const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    let audioUnlocked = false, pendingUrl = null;
     const enableBtn = document.getElementById('enable-audio');
-    function unlockAudio() {
+    async function unlockAudio() {
       if (audioUnlocked) return;
-      audioUnlocked = true;
-      // Priming play() inside the gesture marks the element as user-activated so
-      // later programmatic play() calls (greetings) are allowed.
-      player.play().catch(() => {});
-      enableBtn.style.display = 'none';
+      try {
+        player.src = SILENT_WAV;
+        await player.play();          // real playback inside the gesture = activation
+        audioUnlocked = true;
+        enableBtn.style.display = 'none';
+        badgeListener.textContent = 'audio: ready';
+        badgeListener.className = 'badge green';
+        if (pendingUrl) { playGreeting(pendingUrl); pendingUrl = null; }
+      } catch (err) {
+        console.error('audio unlock failed:', err);
+        enableBtn.textContent = '🔊 Tap again to enable sound';
+      }
     }
     enableBtn.addEventListener('click', unlockAudio);
-    document.addEventListener('click', unlockAudio, { once: true });
+
+    function playGreeting(url) {
+      player.src = url;
+      player.play().catch(err => console.error('audio play:', err));
+    }
 
     sse.addEventListener('audio', e => {
       const { wav_url, text } = JSON.parse(e.data);
       lastGreeting.textContent = '"' + text + '"';
       if (!audioUnlocked) {
+        pendingUrl = wav_url;
         enableBtn.textContent = '🔊 Enable sound (greeting waiting)';
-        return;  // can't autoplay yet; wait for the user to enable sound
+        return;
       }
-      player.src = wav_url;
-      player.play().catch(err => console.error('audio play:', err));
+      playGreeting(wav_url);
     });
     sse.onerror = () => {
       badgeListener.textContent = 'audio: disconnected';
