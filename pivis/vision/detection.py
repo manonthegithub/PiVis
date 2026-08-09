@@ -8,7 +8,6 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _PERSON_CLASS_ID = 0
-_INPUT_SIZE = 640
 
 
 @dataclass
@@ -29,8 +28,9 @@ class DetectionResult:
 
 
 class DetectionEngine:
-    def __init__(self, confidence_threshold: float = 0.5) -> None:
+    def __init__(self, confidence_threshold: float = 0.5, input_size: int = 320) -> None:
         self._threshold = confidence_threshold
+        self._input_size = input_size
         self._session = None
 
     def load(self, model_path: Path | str) -> None:
@@ -73,7 +73,7 @@ class DetectionEngine:
         if frame.ndim != 3 or frame.shape[2] != 3:
             raise ValueError(f"Expected HxWx3 frame, got {frame.shape}")
 
-        resized = cv2.resize(frame, (_INPUT_SIZE, _INPUT_SIZE))
+        resized = cv2.resize(frame, (self._input_size, self._input_size))
         blob = resized.astype(np.float32) / 255.0
         return blob.transpose(2, 0, 1)[np.newaxis]  # NCHW
 
@@ -82,7 +82,6 @@ class DetectionEngine:
     ) -> list[BoundingBox]:
         # YOLOv8 output: [1, 84, 8400] — 4 box coords + 80 class scores
         predictions = outputs[0][0].T  # (8400, 84)
-        h_orig, w_orig = original_shape[:2]
 
         boxes = []
         for pred in predictions:
@@ -94,10 +93,10 @@ class DetectionEngine:
                 continue
 
             cx, cy, w, h = pred[:4]
-            x1 = (cx - w / 2) / _INPUT_SIZE
-            y1 = (cy - h / 2) / _INPUT_SIZE
-            x2 = (cx + w / 2) / _INPUT_SIZE
-            y2 = (cy + h / 2) / _INPUT_SIZE
+            x1 = (cx - w / 2) / self._input_size
+            y1 = (cy - h / 2) / self._input_size
+            x2 = (cx + w / 2) / self._input_size
+            y2 = (cy + h / 2) / self._input_size
             boxes.append(BoundingBox(
                 x1=float(np.clip(x1, 0, 1)),
                 y1=float(np.clip(y1, 0, 1)),

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     # Detection
     detection_interval_ms: int = 200
     detection_confidence: float = 0.5
+    detection_input_size: int = 320  # YOLO input resolution; 320=fast, 640=accurate
     yolo_model_path: Path = Path("models/yolov8n.onnx")
 
     # Greeting
