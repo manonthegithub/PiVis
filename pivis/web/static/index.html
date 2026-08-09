@@ -60,11 +60,19 @@
       if (sbBusy || !sbQueue.length || !sb || sb.updating) return;
       sbBusy = true;
       sb.addEventListener('updateend', () => { sbBusy = false; sbDrain(); }, { once: true });
-      try { sb.appendBuffer(sbQueue.shift()); } catch(e) { sbBusy = false; }
+      try { sb.appendBuffer(sbQueue.shift()); } catch(e) { console.error('appendBuffer:', e); sbBusy = false; }
     }
 
     ms.addEventListener('sourceopen', () => {
-      sb = ms.addSourceBuffer('video/mp4; codecs="avc1.4D401E"');
+      const codec = 'video/mp4; codecs="avc1.640032"';
+      if (!MediaSource.isTypeSupported(codec)) {
+        console.error('Codec not supported:', codec);
+        badgeStream.textContent = 'stream: codec unsupported';
+        badgeStream.className = 'badge red';
+        return;
+      }
+      sb = ms.addSourceBuffer(codec);
+      sb.addEventListener('error', e => console.error('SourceBuffer error:', e));
       // Buffer eviction every 30s
       setInterval(() => {
         if (!sb || sb.updating || !sb.buffered.length) return;
@@ -75,6 +83,8 @@
       }, 30_000);
       wsReady = true;
     });
+    ms.addEventListener('error', e => console.error('MediaSource error:', e));
+    video.addEventListener('error', e => console.error('Video error:', video.error?.message, e));
 
     let ws;
     function connectStream() {

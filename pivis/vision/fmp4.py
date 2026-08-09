@@ -4,7 +4,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 _FFMPEG_CMD = [
-    "ffmpeg", "-hide_banner", "-loglevel", "error",
+    "ffmpeg", "-hide_banner", "-loglevel", "warning",
     "-f", "h264", "-i", "pipe:0",
     "-c:v", "copy",
     "-f", "mp4",
@@ -25,9 +25,16 @@ class FMP4Streamer:
             *_FFMPEG_CMD,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
+        asyncio.create_task(self._log_stderr())
         logger.info("FMP4Streamer: ffmpeg started (pid %d)", self._proc.pid)
+
+    async def _log_stderr(self) -> None:
+        if self._proc is None or self._proc.stderr is None:
+            return
+        async for line in self._proc.stderr:
+            logger.warning("ffmpeg: %s", line.decode().rstrip())
 
     async def stop(self) -> None:
         if self._proc is None:
@@ -40,9 +47,10 @@ class FMP4Streamer:
         self._proc = None
         logger.info("FMP4Streamer: ffmpeg stopped")
 
-    def push(self, nal_bytes: bytes) -> None:
+    async def push(self, nal_bytes: bytes) -> None:
         if self._proc and self._proc.stdin and not self._proc.stdin.is_closing():
             self._proc.stdin.write(nal_bytes)
+            await self._proc.stdin.drain()
 
     async def read_chunk(self) -> bytes:
         if self._proc is None or self._proc.stdout is None:
@@ -60,19 +68,28 @@ async def run_fmp4_loop(
     """Read NAL units from nal_queue, remux via ffmpeg, push fMP4 chunks to fmp4_queue."""
     streamer = FMP4Streamer()
     await streamer.start()
+    chunks_produced = 0
 
     async def _reader() -> None:
+        nonlocal chunks_produced
         while True:
             chunk = await streamer.read_chunk()
             if not chunk:
                 break
+            chunks_produced += 1
+            if chunks_produced == 1:
+                logger.info("fMP4: first chunk produced (%d bytes)", len(chunk))
             await fmp4_queue.put(chunk)
 
     reader_task = asyncio.create_task(_reader())
+    nals_received = 0
     try:
         while True:
             nal_bytes, _keyframe, _pts = await nal_queue.get()
-            streamer.push(nal_bytes)
+            nals_received += 1
+            if nals_received == 1:
+                logger.info("fMP4: first NAL unit received (%d bytes)", len(nal_bytes))
+            await streamer.push(nal_bytes)
     except asyncio.CancelledError:
         pass
     finally:
