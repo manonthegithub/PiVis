@@ -39,7 +39,10 @@ class DetectionEngine:
         model_path = Path(model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"YOLO model not found: {model_path}")
-        self._session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        opts.intra_op_num_threads = 4  # Pi5 has 4 cores
+        self._session = ort.InferenceSession(str(model_path), sess_options=opts, providers=["CPUExecutionProvider"])
         self._input_name = self._session.get_inputs()[0].name
         logger.info("DetectionEngine loaded: %s", model_path)
 
@@ -81,30 +84,25 @@ class DetectionEngine:
         self, outputs: list, original_shape: tuple
     ) -> list[BoundingBox]:
         # YOLOv8 output: [1, 84, 8400] — 4 box coords + 80 class scores
-        predictions = outputs[0][0].T  # (8400, 84)
+        preds = outputs[0][0].T  # (8400, 84)
+        scores = preds[:, 4:]
+        class_ids = np.argmax(scores, axis=1)
+        confidences = scores[np.arange(len(scores)), class_ids]
 
-        boxes = []
-        for pred in predictions:
-            scores = pred[4:]
-            class_id = int(np.argmax(scores))
-            confidence = float(scores[class_id])
+        mask = (class_ids == _PERSON_CLASS_ID) & (confidences >= self._threshold)
+        if not mask.any():
+            return []
 
-            if class_id != _PERSON_CLASS_ID or confidence < self._threshold:
-                continue
+        p = preds[mask]
+        c = confidences[mask]
+        s = self._input_size
+        x1 = np.clip((p[:, 0] - p[:, 2] / 2) / s, 0, 1)
+        y1 = np.clip((p[:, 1] - p[:, 3] / 2) / s, 0, 1)
+        x2 = np.clip((p[:, 0] + p[:, 2] / 2) / s, 0, 1)
+        y2 = np.clip((p[:, 1] + p[:, 3] / 2) / s, 0, 1)
 
-            cx, cy, w, h = pred[:4]
-            x1 = (cx - w / 2) / self._input_size
-            y1 = (cy - h / 2) / self._input_size
-            x2 = (cx + w / 2) / self._input_size
-            y2 = (cy + h / 2) / self._input_size
-            boxes.append(BoundingBox(
-                x1=float(np.clip(x1, 0, 1)),
-                y1=float(np.clip(y1, 0, 1)),
-                x2=float(np.clip(x2, 0, 1)),
-                y2=float(np.clip(y2, 0, 1)),
-                confidence=confidence,
-            ))
-
+        boxes = [BoundingBox(float(x1[i]), float(y1[i]), float(x2[i]), float(y2[i]), float(c[i]))
+                 for i in range(len(p))]
         return self._nms(boxes)
 
     @staticmethod
