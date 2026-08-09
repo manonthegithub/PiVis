@@ -21,28 +21,37 @@ class Camera(Protocol):
     def stop_h264(self) -> None: ...
 
 
-class NalQueueOutput:
-    """Routes picamera2 H264Encoder output to an asyncio queue."""
+def _make_nal_output(queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
+    """Build an Output-subclass instance that routes encoder NALs to an asyncio queue.
 
-    def __init__(self, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, start_ts_ns: int) -> None:
-        self._queue = queue
-        self._loop = loop
-        self._start_ts_ns = start_ts_ns
+    Constructed lazily so picamera2 is only imported on-device (not in tests/off-Pi).
+    """
+    from picamera2.outputs import Output
 
-    def outputframe(
-        self,
-        data: bytes,
-        keyframe: bool = True,
-        timestamp: int | None = None,
-        packet=None,
-        audio: bool = False,
-    ) -> None:
-        # picamera2's Encoder calls this positionally as (frame, keyframe, timestamp, packet, audio).
-        if audio or not data:
-            return
-        # timestamp is PTS from the encoder in microseconds; convert to 90kHz ticks.
-        pts_ticks = (timestamp or 0) * _PTS_HZ // 1_000_000
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, (data, keyframe, pts_ticks))
+    class NalQueueOutput(Output):
+        """Routes picamera2 H264Encoder output to an asyncio queue."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self._queue = queue
+            self._loop = loop
+
+        def outputframe(
+            self,
+            data: bytes,
+            keyframe: bool = True,
+            timestamp: int | None = None,
+            packet=None,
+            audio: bool = False,
+        ) -> None:
+            # picamera2's Encoder calls this positionally as (frame, keyframe, timestamp, packet, audio).
+            if audio or not data:
+                return
+            # timestamp is PTS from the encoder in microseconds; convert to 90kHz ticks.
+            pts_ticks = (timestamp or 0) * _PTS_HZ // 1_000_000
+            self._loop.call_soon_threadsafe(self._queue.put_nowait, (data, keyframe, pts_ticks))
+
+    return NalQueueOutput()
 
 
 class PiCamera:
@@ -111,8 +120,7 @@ class PiCamera:
     def start_h264(self, nal_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
         from picamera2.encoders import H264Encoder
 
-        # Use current time as PTS origin (encoder timestamps are relative anyway)
-        self._nal_output = NalQueueOutput(nal_queue, loop, start_ts_ns=0)
+        self._nal_output = _make_nal_output(nal_queue, loop)
         # profile="main" matches the browser MediaSource codec string (avc1.4D401E);
         # repeat=True re-emits SPS/PPS with every keyframe so late-joining clients can decode.
         self._encoder = H264Encoder(bitrate=1_000_000, repeat=True, profile="main")

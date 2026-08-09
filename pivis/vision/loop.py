@@ -35,7 +35,10 @@ async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppStat
     engine.load(settings.yolo_model_path)
     camera.start()
     loop = asyncio.get_event_loop()
-    camera.start_h264(queues.nal_queue, loop)
+    try:
+        camera.start_h264(queues.nal_queue, loop)
+    except Exception:
+        logger.exception("Failed to start H264 encoder; video stream disabled")
     logger.info("Vision loop started")
 
     interval_s = settings.detection_interval_ms / 1000
