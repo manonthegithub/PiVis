@@ -61,6 +61,18 @@ async def test_both_runs_browser_and_local(wav):
     assert event.text == "Hi!"
 
 
+@pytest.mark.asyncio
+async def test_both_keeps_wav_for_browser_fetch(wav):
+    # Regression: local path must not delete the WAV the browser still needs to GET.
+    q = Queues()
+    proc_mock = AsyncMock()
+    proc_mock.returncode = 0
+    proc_mock.communicate = AsyncMock(return_value=(b"", b""))
+    with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        await BothAudioOutput(device="default").play(wav, "Hi!", q.events)
+    assert wav.exists()  # still present immediately after play (deferred cleanup)
+
+
 def test_make_audio_output_modes():
     assert isinstance(make_audio_output("browser"), BrowserAudioOutput)
     assert isinstance(make_audio_output("local"), LocalAudioOutput)

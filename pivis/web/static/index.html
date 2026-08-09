@@ -30,6 +30,7 @@
     <span id="badge-person" class="badge">no person</span>
     <span id="badge-stream" class="badge">stream: connecting</span>
     <span id="badge-listener" class="badge">audio: connecting</span>
+    <button id="enable-audio">&#128266; Enable sound</button>
   </div>
   <div id="last-greeting"></div>
   <div style="margin-top:0.6rem;display:flex;gap:0.5rem;align-items:center;font-size:0.8rem;flex-wrap:wrap;">
@@ -191,11 +192,29 @@
       badgePerson.className = 'badge' + (d.has_person ? ' green' : '');
       if (d.has_person && d.boxes.length) drawBoxes(d.boxes);
     });
+    // Browsers block audio playback until a user gesture. Unlock on first click.
+    let audioUnlocked = false;
+    const enableBtn = document.getElementById('enable-audio');
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      // Priming play() inside the gesture marks the element as user-activated so
+      // later programmatic play() calls (greetings) are allowed.
+      player.play().catch(() => {});
+      enableBtn.style.display = 'none';
+    }
+    enableBtn.addEventListener('click', unlockAudio);
+    document.addEventListener('click', unlockAudio, { once: true });
+
     sse.addEventListener('audio', e => {
       const { wav_url, text } = JSON.parse(e.data);
-      player.src = wav_url;
-      player.play().catch(() => {});
       lastGreeting.textContent = '"' + text + '"';
+      if (!audioUnlocked) {
+        enableBtn.textContent = '🔊 Enable sound (greeting waiting)';
+        return;  // can't autoplay yet; wait for the user to enable sound
+      }
+      player.src = wav_url;
+      player.play().catch(err => console.error('audio play:', err));
     });
     sse.onerror = () => {
       badgeListener.textContent = 'audio: disconnected';
