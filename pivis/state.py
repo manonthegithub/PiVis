@@ -21,7 +21,6 @@ class AppState:
 
 @dataclass
 class Queues:
-    frames: asyncio.Queue[bytes] = field(default_factory=lambda: asyncio.Queue(maxsize=2))
     events: asyncio.Queue[AudioEvent] = field(default_factory=asyncio.Queue)
     controls: asyncio.Queue[dict] = field(default_factory=asyncio.Queue)
 

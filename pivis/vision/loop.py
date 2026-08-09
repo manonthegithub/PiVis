@@ -80,14 +80,6 @@ async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppStat
             jpeg, side_jpeg = encode_jpeg(frame, boxes)
             app_state.latest_jpeg = jpeg
             app_state.latest_side_jpeg = side_jpeg
-            try:
-                queues.frames.put_nowait(jpeg)
-            except asyncio.QueueFull:
-                try:
-                    queues.frames.get_nowait()  # drop oldest
-                    queues.frames.put_nowait(jpeg)
-                except asyncio.QueueEmpty:
-                    pass
 
             await asyncio.sleep(1 / settings.stream_fps)
 

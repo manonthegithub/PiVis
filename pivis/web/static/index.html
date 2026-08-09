@@ -23,7 +23,8 @@
   <img id="stream" alt="camera stream">
   <div id="status-bar">
     <span id="badge-person" class="badge">no person</span>
-    <span id="badge-listener" class="badge">browser: connected</span>
+    <span id="badge-stream" class="badge">stream: connecting</span>
+    <span id="badge-listener" class="badge">audio: connecting</span>
   </div>
   <div id="last-greeting"></div>
   <div style="margin-top:0.6rem;display:flex;gap:1rem;align-items:center;font-size:0.8rem;flex-wrap:wrap;">
@@ -40,33 +41,43 @@
 
   <script>
     const badgePerson = document.getElementById('badge-person');
+    const badgeStream = document.getElementById('badge-stream');
     const badgeListener = document.getElementById('badge-listener');
     const lastGreeting = document.getElementById('last-greeting');
     const player = document.getElementById('audio-player');
     const streamImg = document.getElementById('stream');
 
-    // Poll /snapshot — works on all browsers including Safari (no MJPEG)
-    let framePending = false;
     let sideView = false;
+    let ws, prevBlobUrl;
+
+    function connectStream() {
+      if (ws) ws.close();
+      const url = 'ws://' + location.host + '/ws/stream' + (sideView ? '?side=1' : '');
+      ws = new WebSocket(url);
+      ws.binaryType = 'blob';
+      ws.onopen = () => {
+        badgeStream.textContent = 'stream: live';
+        badgeStream.className = 'badge green';
+      };
+      ws.onmessage = (e) => {
+        const blobUrl = URL.createObjectURL(e.data);
+        streamImg.src = blobUrl;
+        if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
+        prevBlobUrl = blobUrl;
+      };
+      ws.onclose = () => {
+        badgeStream.textContent = 'stream: reconnecting';
+        badgeStream.className = 'badge red';
+        setTimeout(connectStream, 1500);
+      };
+    }
+    connectStream();
 
     function toggleSide() {
       sideView = !sideView;
       document.getElementById('btn-side').textContent = sideView ? '&#9974; Annotated only' : '&#9974; Side-by-side';
+      connectStream();
     }
-
-    function fetchFrame() {
-      if (framePending) return;
-      framePending = true;
-      const img = new Image();
-      img.onload = () => {
-        streamImg.src = img.src;
-        framePending = false;
-      };
-      img.onerror = () => { framePending = false; };
-      img.src = '/snapshot?' + (sideView ? 'side=1&' : '') + 't=' + Date.now();
-    }
-    setInterval(fetchFrame, 50); // ~20fps
-    fetchFrame();
 
     const evtSource = new EventSource('/events');
     evtSource.onmessage = (e) => {
@@ -76,11 +87,11 @@
       lastGreeting.textContent = '"' + text + '"';
     };
     evtSource.onerror = () => {
-      badgeListener.textContent = 'browser: disconnected';
+      badgeListener.textContent = 'audio: disconnected';
       badgeListener.className = 'badge red';
     };
     evtSource.onopen = () => {
-      badgeListener.textContent = 'browser: connected';
+      badgeListener.textContent = 'audio: connected';
       badgeListener.className = 'badge green';
     };
 
@@ -89,10 +100,6 @@
         const data = await fetch('/status').then(r => r.json());
         badgePerson.textContent = data.has_person ? 'person detected' : 'no person';
         badgePerson.className = 'badge' + (data.has_person ? ' green' : '');
-        if (data.sse_client_count === 0) {
-          badgeListener.textContent = 'no browser listener';
-          badgeListener.className = 'badge red';
-        }
       } catch (_) {}
     }
     setInterval(pollStatus, 2000);
@@ -103,7 +110,7 @@
       s.textContent = 'applying...';
       try {
         await fetch('/settings/lighting/' + preset, {method: 'POST'});
-        s.textContent = '✓ ' + preset;
+        s.textContent = '&#10003; ' + preset;
       } catch(_) { s.textContent = 'failed'; }
     }
   </script>

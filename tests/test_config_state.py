@@ -38,15 +38,5 @@ def test_audio_event():
 
 def test_queues_created():
     q = Queues()
-    assert q.frames.maxsize == 2
-    assert q.events.maxsize == 0  # unbounded
-
-
-def test_frame_queue_drops_old_when_full():
-    async def _run():
-        q = Queues()
-        await q.frames.put(b"frame1")
-        await q.frames.put(b"frame2")
-        assert q.frames.full()
-
-    asyncio.run(_run())
+    assert q.events.maxsize == 0   # unbounded
+    assert q.controls.maxsize == 0  # unbounded

@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from pivis.state import LIGHTING_PRESETS, AppState, Queues
@@ -20,24 +20,17 @@ def _attach(queues: Queues, app_state: AppState) -> None:
     async def index():
         return FileResponse(_STATIC_DIR / "index.html")
 
-    @router.get("/stream")
-    async def stream():
-        async def _mjpeg():
+    @router.websocket("/ws/stream")
+    async def ws_stream(websocket: WebSocket, side: bool = False):
+        await websocket.accept()
+        try:
             while True:
-                try:
-                    jpeg = await asyncio.wait_for(queues.frames.get(), timeout=1.0)
-                    yield (
-                        b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-                    )
-                except asyncio.TimeoutError:
-                    # keepalive empty boundary so browser doesn't disconnect
-                    yield b"--frame\r\n\r\n"
-
-        return StreamingResponse(
-            _mjpeg(),
-            media_type="multipart/x-mixed-replace; boundary=frame",
-        )
+                jpeg = app_state.latest_side_jpeg if side else app_state.latest_jpeg
+                if jpeg:
+                    await websocket.send_bytes(jpeg)
+                await asyncio.sleep(0.05)  # 20fps
+        except (WebSocketDisconnect, Exception):
+            pass
 
     @router.get("/events")
     async def events():
