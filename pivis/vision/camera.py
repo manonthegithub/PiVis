@@ -29,9 +29,19 @@ class NalQueueOutput:
         self._loop = loop
         self._start_ts_ns = start_ts_ns
 
-    def outputframe(self, data: bytes, keyframe: bool = False, timestamp: int = 0) -> None:
-        # timestamp here is PTS from the encoder in microseconds; convert to 90kHz ticks
-        pts_ticks = timestamp * _PTS_HZ // 1_000_000
+    def outputframe(
+        self,
+        data: bytes,
+        keyframe: bool = True,
+        timestamp: int | None = None,
+        packet=None,
+        audio: bool = False,
+    ) -> None:
+        # picamera2's Encoder calls this positionally as (frame, keyframe, timestamp, packet, audio).
+        if audio or not data:
+            return
+        # timestamp is PTS from the encoder in microseconds; convert to 90kHz ticks.
+        pts_ticks = (timestamp or 0) * _PTS_HZ // 1_000_000
         self._loop.call_soon_threadsafe(self._queue.put_nowait, (data, keyframe, pts_ticks))
 
 
@@ -103,7 +113,9 @@ class PiCamera:
 
         # Use current time as PTS origin (encoder timestamps are relative anyway)
         self._nal_output = NalQueueOutput(nal_queue, loop, start_ts_ns=0)
-        self._encoder = H264Encoder(bitrate=1_000_000, repeat_sequence_header=True)
+        # profile="main" matches the browser MediaSource codec string (avc1.4D401E);
+        # repeat=True re-emits SPS/PPS with every keyframe so late-joining clients can decode.
+        self._encoder = H264Encoder(bitrate=1_000_000, repeat=True, profile="main")
         self._encoder.output = self._nal_output
         self._cam.start_encoder(self._encoder)
         logger.info("H264Encoder started")

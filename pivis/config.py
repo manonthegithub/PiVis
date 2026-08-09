@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     camera_analogue_gain: float = 4.0  # 1.0=normal, higher=more sensitive (indoor: 4-8)
 
     # Detection
-    detection_interval_ms: int = 200
+    detection_interval_ms: int = 500  # 2 detections/s; leaves CPU headroom for H.264 encoding
     detection_confidence: float = 0.5
     detection_input_size: int = 320  # YOLO input resolution; 320=fast, 640=accurate
     yolo_model_path: Path = Path("models/yolov8n.onnx")

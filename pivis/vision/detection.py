@@ -42,8 +42,17 @@ class DetectionEngine:
             raise FileNotFoundError(f"YOLO model not found: {model_path}")
         opts = ort.SessionOptions()
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL  # single model, no op-level parallelism
         opts.intra_op_num_threads = 4  # Pi5 has 4 cores
-        self._session = ort.InferenceSession(str(model_path), sess_options=opts, providers=["CPUExecutionProvider"])
+        opts.inter_op_num_threads = 1  # sequential mode uses only intra-op threads
+        # Cache the fully-optimized graph so subsequent loads reuse it and skip re-optimization.
+        optimized_path = model_path.with_suffix(".opt.onnx")
+        if optimized_path.exists():
+            load_path = optimized_path
+        else:
+            load_path = model_path
+            opts.optimized_model_filepath = str(optimized_path)
+        self._session = ort.InferenceSession(str(load_path), sess_options=opts, providers=["CPUExecutionProvider"])
         self._input_name = self._session.get_inputs()[0].name
         logger.info("DetectionEngine loaded: %s", model_path)
 
