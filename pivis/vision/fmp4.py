@@ -70,6 +70,7 @@ async def run_fmp4_loop(
     nal_queue: asyncio.Queue,
     fmp4_queue: asyncio.Queue,
     fps: int = 20,
+    queues=None,  # Queues instance for caching init segment
 ) -> None:
     """Read NAL units from nal_queue, remux via ffmpeg, push fMP4 chunks to fmp4_queue."""
     streamer = FMP4Streamer()
@@ -85,6 +86,9 @@ async def run_fmp4_loop(
             chunks_produced += 1
             if chunks_produced == 1:
                 logger.info("fMP4: first chunk produced (%d bytes)", len(chunk))
+                # Cache init segment so new WebSocket clients get it on reconnect
+                if queues is not None:
+                    queues.fmp4_init = chunk
             await fmp4_queue.put(chunk)
 
     reader_task = asyncio.create_task(_reader())

@@ -31,6 +31,9 @@ class Queues:
     controls: asyncio.Queue[dict] = field(default_factory=asyncio.Queue)
     nal_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     fmp4_queue: asyncio.Queue[bytes] = field(default_factory=asyncio.Queue)
+    # Cached fMP4 init segment (ftyp+moov); sent to each new WebSocket client so
+    # reconnects don't miss it.
+    fmp4_init: bytes | None = None
 
 
 LIGHTING_PRESETS = {

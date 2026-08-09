@@ -24,6 +24,9 @@ def _attach(queues: Queues, app_state: AppState) -> None:
     async def ws_stream(websocket: WebSocket):
         await websocket.accept()
         try:
+            # Send cached init segment first so reconnects don't miss ftyp+moov
+            if queues.fmp4_init is not None:
+                await websocket.send_bytes(queues.fmp4_init)
             while True:
                 chunk = await queues.fmp4_queue.get()
                 await websocket.send_bytes(chunk)

@@ -54,7 +54,7 @@
     // --- MediaSource / WebSocket stream ---
     const ms = new MediaSource();
     video.src = URL.createObjectURL(ms);
-    let sb, sbQueue = [], sbBusy = false, wsReady = false;
+    let sb, sbQueue = [], sbBusy = false;
 
     function sbDrain() {
       if (sbBusy || !sbQueue.length || !sb || sb.updating) return;
@@ -73,6 +73,8 @@
       }
       sb = ms.addSourceBuffer(codec);
       sb.addEventListener('error', e => console.error('SourceBuffer error:', e));
+      // Drain any data that arrived before sourceopen fired
+      sbDrain();
       // Buffer eviction every 30s
       setInterval(() => {
         if (!sb || sb.updating || !sb.buffered.length) return;
@@ -81,7 +83,6 @@
           try { sb.remove(0, end - 60); } catch(_) {}
         }
       }, 30_000);
-      wsReady = true;
     });
     ms.addEventListener('error', e => console.error('MediaSource error:', e));
     video.addEventListener('error', e => console.error('Video error:', video.error?.message, e));
@@ -95,10 +96,9 @@
         badgeStream.className = 'badge green';
       };
       ws.onmessage = e => {
-        if (!wsReady) return;
+        // Always queue — sbDrain guards against !sb (before sourceopen)
         sbQueue.push(e.data);
         sbDrain();
-        // Start playback with ~150ms buffer delay after first data
         if (video.paused && video.readyState >= 2) {
           video.play().catch(() => {});
         }
