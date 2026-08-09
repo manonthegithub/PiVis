@@ -74,10 +74,23 @@ async def test_greeting_fires_after_cooldown():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_error_does_not_crash():
-    orch, claude, _, _, _ = _make_orchestrator()
-    claude.generate_greeting.side_effect = Exception("API down")
+async def test_claude_failure_falls_back_to_generic_greeting():
+    from pivis.vision.greeting import _FALLBACK_GREETINGS
+    orch, claude, tts, audio, _ = _make_orchestrator()
+    claude.generate_greeting.side_effect = Exception("credit balance too low")
     await orch.on_detection(_result(has_person=True), _frame())  # must not raise
+    # Person is still greeted with a fallback line, spoken via TTS + audio.
+    spoken = tts.synthesize.call_args[0][0]
+    assert spoken in _FALLBACK_GREETINGS
+    audio.play.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_tts_failure_does_not_crash():
+    orch, claude, tts, audio, _ = _make_orchestrator()
+    tts.synthesize.side_effect = Exception("piper missing")
+    await orch.on_detection(_result(has_person=True), _frame())  # must not raise
+    audio.play.assert_not_awaited()
 
 
 @pytest.mark.asyncio

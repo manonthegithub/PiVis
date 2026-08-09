@@ -1,5 +1,6 @@
 import base64
 import logging
+import random
 import time
 
 import cv2
@@ -18,6 +19,15 @@ _SYSTEM_PROMPT = (
     "Notice something specific and visible about their appearance "
     "(e.g. clothing colour, hair, hat, glasses, bag) and mention it naturally. "
     "Be varied — don't repeat the same greeting. No quotes."
+)
+
+# Spoken when Claude is unavailable (e.g. no API credits) so a person is still
+# greeted — just without appearance-specific detail.
+_FALLBACK_GREETINGS = (
+    "Hello there! Great to see you.",
+    "Hi! Welcome — nice to see you.",
+    "Hey, welcome!",
+    "Hello! Lovely to see you today.",
 )
 
 
@@ -84,9 +94,16 @@ class GreetingOrchestrator:
         self._state.last_greeting_at = time.time()
         person_count = len(result.boxes)
 
+        # Claude adds appearance-specific detail but is optional — fall back to a
+        # generic line so the person is still greeted if the API is unavailable.
         try:
             text = await self._claude.generate_greeting(frame, person_count)
+        except Exception as exc:
+            text = random.choice(_FALLBACK_GREETINGS)
+            logger.warning("Claude greeting unavailable, using fallback: %s", exc)
+
+        try:
             wav_path = self._tts.synthesize(text)
             await self._audio.play(wav_path, text, self._queue)
         except Exception:
-            logger.exception("Greeting pipeline failed — skipping")
+            logger.exception("TTS/audio failed — no greeting played")
