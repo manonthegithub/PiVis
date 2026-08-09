@@ -59,13 +59,16 @@
     video.src = URL.createObjectURL(ms);
     let sb, sbQueue = [], sbBusy = false;
 
+    const LIVE_LATENCY = 0.15;  // seconds of buffer to keep behind the live edge
     function syncToLiveEdge() {
       if (!sb || !sb.buffered.length) return;
       const start = sb.buffered.start(0), end = sb.buffered.end(0);
-      // Seek if playhead is outside buffered range or lagging >3s behind live.
-      if (video.currentTime < start || video.currentTime > end + 0.5 || end - video.currentTime > 3) {
-        try { video.currentTime = Math.max(start, end - 0.5); } catch (_) {}
+      // Seek if playhead is outside buffered range or lagging >0.8s behind live.
+      if (video.currentTime < start || video.currentTime > end + 0.3 || end - video.currentTime > 0.8) {
+        try { video.currentTime = Math.max(start, end - LIVE_LATENCY); } catch (_) {}
       }
+      // Nudge playback rate up slightly when drifting behind to catch up smoothly.
+      video.playbackRate = (end - video.currentTime > 0.4) ? 1.1 : 1.0;
       if (video.paused) video.play().catch(() => {});
     }
 

@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 def _build_ffmpeg_cmd(fps: int = 20) -> list[str]:
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
+        "-fflags", "+nobuffer", "-flags", "low_delay",
         # use_wallclock_as_timestamps: stamp each packet with real wall clock so
         # the MP4 muxer always receives valid, monotonically-increasing PTS from
         # raw H264 pipe input (which carries no timing in the bitstream).
@@ -14,6 +15,9 @@ def _build_ffmpeg_cmd(fps: int = 20) -> list[str]:
         "-c:v", "copy",
         "-f", "mp4",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset",
+        # Emit a fragment every 100ms (not only at keyframes) and flush each
+        # packet immediately so the browser gets low-latency chunks.
+        "-frag_duration", "100000", "-flush_packets", "1",
         "pipe:1",
     ]
 _READ_SIZE = 65_536
