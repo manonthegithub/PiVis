@@ -101,9 +101,18 @@ class PiCamera:
             self._cam.stop()
 
     def get_frame(self) -> np.ndarray | None:
-        """Return latest main frame (RGB) for Claude vision API."""
+        """Return latest main frame as RGB for Claude vision API.
+
+        Converts YUV→RGB lazily here (called ~1×/s on detection) instead of on
+        every captured frame, keeping the 20fps capture loop cheap.
+        """
+        import cv2
+
         with self._lock:
-            return self._frame.copy() if self._frame is not None else None
+            yuv = self._frame.copy() if self._frame is not None else None
+        if yuv is None:
+            return None
+        return cv2.cvtColor(yuv, cv2.COLOR_YUV420p2RGB)
 
     def get_lores(self) -> tuple[np.ndarray, int] | None:
         """Return (lores_rgb_frame, sensor_timestamp_ns) for YOLO."""
@@ -121,11 +130,12 @@ class PiCamera:
         from picamera2.encoders import H264Encoder
 
         self._nal_output = _make_nal_output(nal_queue, loop)
-        # profile="main" matches the browser MediaSource codec string (avc1.4D401E);
-        # repeat=True re-emits SPS/PPS with every keyframe so late-joining clients can decode.
-        # iperiod=5 → keyframe every 0.25s at 20fps; frequent keyframes keep
-        # live-edge seeks cheap (a seek snaps to the nearest prior keyframe).
-        self._encoder = H264Encoder(bitrate=1_000_000, repeat=True, profile="main", iperiod=5)
+        # profile="main" matches the browser codec string (avc1.4D401E).
+        # repeat=True re-emits SPS/PPS with every keyframe so late joiners can decode.
+        # iperiod = one keyframe per second: I-frames are far costlier to encode
+        # than P-frames, so frequent keyframes burn CPU. 1s balances encode cost
+        # against join latency (a new viewer waits ≤1s for the first keyframe).
+        self._encoder = H264Encoder(bitrate=1_000_000, repeat=True, profile="main", iperiod=self._fps)
         self._encoder.output = self._nal_output
         self._cam.start_encoder(self._encoder)
         logger.info("H264Encoder started")
@@ -139,20 +149,17 @@ class PiCamera:
             self._encoder = None
 
     def _capture_loop(self) -> None:
-        import cv2
         while self._running:
             try:
                 request = self._cam.capture_request()
                 lores = request.make_array("lores")
                 ts_ns = request.get_metadata().get("SensorTimestamp", 0)
-                # main is YUV420; convert to RGB for Claude greeting
-                main_yuv = request.make_array("main")
+                main_yuv = request.make_array("main")  # kept raw; converted on demand
                 request.release()
-                main_rgb = cv2.cvtColor(main_yuv, cv2.COLOR_YUV420p2RGB)
                 with self._lock:
                     self._lores_frame = lores
                     self._lores_ts_ns = ts_ns
-                    self._frame = main_rgb
+                    self._frame = main_yuv
             except Exception:
                 logger.exception("Camera capture error")
 
