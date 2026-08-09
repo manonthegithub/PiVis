@@ -6,10 +6,10 @@ logger = logging.getLogger(__name__)
 def _build_ffmpeg_cmd(fps: int = 20) -> list[str]:
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
-        "-r", str(fps),          # input framerate so ffmpeg can set PTS on raw H264
-        "-f", "h264", "-i", "pipe:0",
+        # genpts: generate missing PTS so mp4 muxer gets proper timestamps
+        # r: nominal fps for PTS spacing
+        "-fflags", "+genpts", "-r", str(fps), "-f", "h264", "-i", "pipe:0",
         "-c:v", "copy",
-        "-r", str(fps),          # output framerate
         "-f", "mp4",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset",
         "pipe:1",
