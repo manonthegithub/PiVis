@@ -51,91 +51,99 @@
     const lastGreeting  = document.getElementById('last-greeting');
     const player        = document.getElementById('audio-player');
 
-    // --- MediaSource / WebSocket stream ---
-    // The stream's PTS base is arbitrary (ffmpeg wall-clock, starts at ~hundreds
-    // of seconds), so we can't assume playback begins at 0 — we seek to the live
-    // buffered edge whenever the playhead is outside the buffered range.
-    const ms = new MediaSource();
-    video.src = URL.createObjectURL(ms);
-    let sb, sbQueue = [], sbBusy = false;
-
-    const LIVE_LATENCY = 0.05;  // seconds of buffer to keep behind the live edge
-    function syncToLiveEdge() {
-      if (!sb || !sb.buffered.length) return;
-      const start = sb.buffered.start(0), end = sb.buffered.end(0);
-      const behind = end - video.currentTime;
-      // Hard-seek only on big desync (outside range or >0.6s behind); a seek
-      // snaps to the nearest keyframe so we avoid doing it constantly.
-      if (video.currentTime < start || video.currentTime > end + 0.3 || behind > 0.6) {
-        try { video.currentTime = Math.max(start, end - LIVE_LATENCY); } catch (_) {}
-        video.playbackRate = 1.0;
-      } else {
-        // Small drift: catch up smoothly by speeding playback slightly. This
-        // self-regulates to hug the live edge without visible seeking.
-        video.playbackRate = behind > 0.12 ? 1.15 : 1.0;
-      }
-      if (video.paused) video.play().catch(() => {});
-    }
-    // Enforce live tracking on a timer, not only on buffer updates.
-    setInterval(syncToLiveEdge, 250);
-
-    function sbDrain() {
-      if (sbBusy || !sbQueue.length || !sb || sb.updating) return;
-      sbBusy = true;
-      sb.addEventListener('updateend', () => {
-        sbBusy = false;
-        syncToLiveEdge();
-        sbDrain();
-      }, { once: true });
-      try { sb.appendBuffer(sbQueue.shift()); } catch(e) { console.error('appendBuffer:', e); sbBusy = false; }
+    function streamLive() {
+      badgeStream.textContent = 'stream: live';
+      badgeStream.className = 'badge green';
     }
 
-    ms.addEventListener('sourceopen', () => {
-      const codec = 'video/mp4; codecs="avc1.640032"';
-      if (!MediaSource.isTypeSupported(codec)) {
-        console.error('Codec not supported:', codec);
-        badgeStream.textContent = 'stream: codec unsupported';
-        badgeStream.className = 'badge red';
-        return;
-      }
-      sb = ms.addSourceBuffer(codec);
-      sb.addEventListener('error', e => console.error('SourceBuffer error:', e));
-      // Drain any data that arrived before sourceopen fired
-      sbDrain();
-      // Evict old buffered data every 10s to bound memory / keep latency low
-      setInterval(() => {
-        if (!sb || sb.updating || !sb.buffered.length) return;
-        const end = sb.buffered.end(0), start = sb.buffered.start(0);
-        if (end - start > 30) {
-          try { sb.remove(start, end - 10); } catch(_) {}
+    // --- WebRTC backend (real-time, ~100-200ms) ---
+    async function startWebRTC() {
+      const pc = new RTCPeerConnection();
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.ontrack = e => { video.srcObject = e.streams[0]; video.play().catch(() => {}); streamLive(); };
+      pc.onconnectionstatechange = () => {
+        if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+          badgeStream.textContent = 'stream: reconnecting';
+          badgeStream.className = 'badge red';
+          setTimeout(() => { pc.close(); startWebRTC(); }, 1500);
         }
-      }, 10_000);
-    });
-    ms.addEventListener('error', e => console.error('MediaSource error:', e));
-    video.addEventListener('error', e => console.error('Video error:', video.error?.message, e));
-    // If the browser stalls (waiting), nudge back to the live edge.
-    video.addEventListener('waiting', syncToLiveEdge);
-
-    let ws;
-    function connectStream() {
-      ws = new WebSocket('ws://' + location.host + '/ws/stream');
-      ws.binaryType = 'arraybuffer';
-      ws.onopen = () => {
-        badgeStream.textContent = 'stream: live';
-        badgeStream.className = 'badge green';
       };
-      ws.onmessage = e => {
-        // Always queue — sbDrain guards against !sb (before sourceopen)
-        sbQueue.push(e.data);
-        sbDrain();
-      };
-      ws.onclose = () => {
-        badgeStream.textContent = 'stream: reconnecting';
-        badgeStream.className = 'badge red';
-        setTimeout(connectStream, 1500);
-      };
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      const answer = await fetch('/webrtc/offer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }),
+      }).then(r => r.json());
+      await pc.setRemoteDescription(answer);
     }
-    connectStream();
+
+    // --- MSE backend (fragmented-MP4 over WebSocket) ---
+    // The stream's PTS base is arbitrary (ffmpeg wall-clock, starts at ~hundreds
+    // of seconds), so we seek to the live buffered edge to stay near real-time.
+    function startMSE() {
+      const ms = new MediaSource();
+      video.src = URL.createObjectURL(ms);
+      let sb, sbQueue = [], sbBusy = false;
+      const LIVE_LATENCY = 0.05;
+
+      function syncToLiveEdge() {
+        if (!sb || !sb.buffered.length) return;
+        const start = sb.buffered.start(0), end = sb.buffered.end(0);
+        const behind = end - video.currentTime;
+        if (video.currentTime < start || video.currentTime > end + 0.3 || behind > 0.6) {
+          try { video.currentTime = Math.max(start, end - LIVE_LATENCY); } catch (_) {}
+          video.playbackRate = 1.0;
+        } else {
+          video.playbackRate = behind > 0.12 ? 1.15 : 1.0;
+        }
+        if (video.paused) video.play().catch(() => {});
+      }
+      setInterval(syncToLiveEdge, 250);
+
+      function sbDrain() {
+        if (sbBusy || !sbQueue.length || !sb || sb.updating) return;
+        sbBusy = true;
+        sb.addEventListener('updateend', () => { sbBusy = false; syncToLiveEdge(); sbDrain(); }, { once: true });
+        try { sb.appendBuffer(sbQueue.shift()); } catch(e) { console.error('appendBuffer:', e); sbBusy = false; }
+      }
+
+      ms.addEventListener('sourceopen', () => {
+        const codec = 'video/mp4; codecs="avc1.640032"';
+        if (!MediaSource.isTypeSupported(codec)) {
+          badgeStream.textContent = 'stream: codec unsupported';
+          badgeStream.className = 'badge red';
+          return;
+        }
+        sb = ms.addSourceBuffer(codec);
+        sb.addEventListener('error', e => console.error('SourceBuffer error:', e));
+        sbDrain();
+        setInterval(() => {
+          if (!sb || sb.updating || !sb.buffered.length) return;
+          const end = sb.buffered.end(0), start = sb.buffered.start(0);
+          if (end - start > 30) { try { sb.remove(start, end - 10); } catch(_) {} }
+        }, 10_000);
+      });
+      video.addEventListener('error', e => console.error('Video error:', video.error?.message, e));
+      video.addEventListener('waiting', syncToLiveEdge);
+
+      let ws;
+      (function connect() {
+        ws = new WebSocket('ws://' + location.host + '/ws/stream');
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = streamLive;
+        ws.onmessage = e => { sbQueue.push(e.data); sbDrain(); };
+        ws.onclose = () => {
+          badgeStream.textContent = 'stream: reconnecting';
+          badgeStream.className = 'badge red';
+          setTimeout(connect, 1500);
+        };
+      })();
+    }
+
+    // Pick the backend the server is configured for.
+    fetch('/config').then(r => r.json()).then(cfg => {
+      if (cfg.stream_mode === 'webrtc') startWebRTC(); else startMSE();
+    }).catch(() => startMSE());
 
     // --- Detection overlay ---
     // The video PTS clock and the sensor-timestamp clock have different origins,

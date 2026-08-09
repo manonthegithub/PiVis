@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from pivis.state import LIGHTING_PRESETS, AppState, Queues
@@ -13,12 +13,26 @@ _STATIC_DIR = Path(__file__).parent / "static"
 router = APIRouter()
 
 
-def _attach(queues: Queues, app_state: AppState) -> None:
+def _attach(queues: Queues, app_state: AppState, settings=None, hub=None, pcs=None) -> None:
     """Inject shared state into route closures."""
+    stream_mode = getattr(settings, "stream_mode", "mse")
 
     @router.get("/")
     async def index():
         return FileResponse(_STATIC_DIR / "index.html")
+
+    @router.get("/config")
+    async def config():
+        return {"stream_mode": stream_mode}
+
+    @router.post("/webrtc/offer")
+    async def webrtc_offer(request: Request):
+        if hub is None:
+            return JSONResponse({"error": "webrtc disabled"}, status_code=400)
+        from pivis.vision.webrtc import handle_offer
+        offer = await request.json()
+        answer = await handle_offer(hub, pcs, offer)
+        return answer
 
     @router.websocket("/ws/stream")
     async def ws_stream(websocket: WebSocket):

@@ -29,3 +29,6 @@ class Settings(BaseSettings):
     # Audio output: "browser" | "local" | "both"
     audio_output: str = "both"
     audio_device: str = "default"
+
+    # Stream backend: "webrtc" (real-time) | "mse" (fragmented-MP4 over WebSocket)
+    stream_mode: str = "webrtc"
