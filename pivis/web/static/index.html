@@ -8,7 +8,9 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #111; color: #eee; font-family: monospace; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 1rem; }
     h1 { font-size: 1.2rem; margin-bottom: 0.75rem; letter-spacing: 0.1em; color: #0f0; }
-    #stream { width: 100%; max-width: 900px; border: 1px solid #333; display: block; }
+    #stream-wrap { position: relative; width: 100%; max-width: 900px; }
+    #stream { width: 100%; display: block; border: 1px solid #333; }
+    #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
     #status-bar { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.8rem; flex-wrap: wrap; }
     .badge { padding: 0.2rem 0.6rem; border-radius: 4px; background: #222; }
     .badge.green { background: #0a2a0a; color: #0f0; }
@@ -20,50 +22,76 @@
 </head>
 <body>
   <h1>PiVis</h1>
-  <img id="stream" alt="camera stream">
+  <div id="stream-wrap">
+    <video id="stream" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
   <div id="status-bar">
     <span id="badge-person" class="badge">no person</span>
     <span id="badge-stream" class="badge">stream: connecting</span>
     <span id="badge-listener" class="badge">audio: connecting</span>
   </div>
   <div id="last-greeting"></div>
-  <div style="margin-top:0.6rem;display:flex;gap:1rem;align-items:center;font-size:0.8rem;flex-wrap:wrap;">
-    <div style="display:flex;gap:0.5rem;align-items:center;">
-      <span style="color:#888">Light:</span>
-      <button onclick="setLighting('daylight')">&#9728; Daylight</button>
-      <button onclick="setLighting('indoor')">&#128161; Indoor</button>
-      <button onclick="setLighting('dim')">&#127769; Dim</button>
-      <span id="lighting-status" style="color:#888"></span>
-    </div>
-    <button id="btn-side" onclick="toggleSide()">&#9974; Side-by-side</button>
+  <div style="margin-top:0.6rem;display:flex;gap:0.5rem;align-items:center;font-size:0.8rem;flex-wrap:wrap;">
+    <span style="color:#888">Light:</span>
+    <button onclick="setLighting('daylight')">&#9728; Daylight</button>
+    <button onclick="setLighting('indoor')">&#128161; Indoor</button>
+    <button onclick="setLighting('dim')">&#127769; Dim</button>
+    <span id="lighting-status" style="color:#888"></span>
   </div>
   <audio id="audio-player" autoplay></audio>
 
   <script>
-    const badgePerson = document.getElementById('badge-person');
-    const badgeStream = document.getElementById('badge-stream');
+    const video   = document.getElementById('stream');
+    const canvas  = document.getElementById('overlay');
+    const ctx     = canvas.getContext('2d');
+    const badgePerson   = document.getElementById('badge-person');
+    const badgeStream   = document.getElementById('badge-stream');
     const badgeListener = document.getElementById('badge-listener');
-    const lastGreeting = document.getElementById('last-greeting');
-    const player = document.getElementById('audio-player');
-    const streamImg = document.getElementById('stream');
+    const lastGreeting  = document.getElementById('last-greeting');
+    const player        = document.getElementById('audio-player');
 
-    let sideView = false;
-    let ws, prevBlobUrl;
+    // --- MediaSource / WebSocket stream ---
+    const ms = new MediaSource();
+    video.src = URL.createObjectURL(ms);
+    let sb, sbQueue = [], sbBusy = false, wsReady = false;
 
+    function sbDrain() {
+      if (sbBusy || !sbQueue.length || !sb || sb.updating) return;
+      sbBusy = true;
+      sb.addEventListener('updateend', () => { sbBusy = false; sbDrain(); }, { once: true });
+      try { sb.appendBuffer(sbQueue.shift()); } catch(e) { sbBusy = false; }
+    }
+
+    ms.addEventListener('sourceopen', () => {
+      sb = ms.addSourceBuffer('video/mp4; codecs="avc1.4D401E"');
+      // Buffer eviction every 30s
+      setInterval(() => {
+        if (!sb || sb.updating || !sb.buffered.length) return;
+        const end = sb.buffered.end(0);
+        if (end > 60) {
+          try { sb.remove(0, end - 60); } catch(_) {}
+        }
+      }, 30_000);
+      wsReady = true;
+    });
+
+    let ws;
     function connectStream() {
-      if (ws) ws.close();
-      const url = 'ws://' + location.host + '/ws/stream' + (sideView ? '?side=1' : '');
-      ws = new WebSocket(url);
-      ws.binaryType = 'blob';
+      ws = new WebSocket('ws://' + location.host + '/ws/stream');
+      ws.binaryType = 'arraybuffer';
       ws.onopen = () => {
         badgeStream.textContent = 'stream: live';
         badgeStream.className = 'badge green';
       };
-      ws.onmessage = (e) => {
-        const blobUrl = URL.createObjectURL(e.data);
-        streamImg.src = blobUrl;
-        if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
-        prevBlobUrl = blobUrl;
+      ws.onmessage = e => {
+        if (!wsReady) return;
+        sbQueue.push(e.data);
+        sbDrain();
+        // Start playback with ~150ms buffer delay after first data
+        if (video.paused && video.readyState >= 2) {
+          video.play().catch(() => {});
+        }
       };
       ws.onclose = () => {
         badgeStream.textContent = 'stream: reconnecting';
@@ -73,43 +101,102 @@
     }
     connectStream();
 
-    function toggleSide() {
-      sideView = !sideView;
-      document.getElementById('btn-side').textContent = sideView ? '&#9974; Annotated only' : '&#9974; Side-by-side';
-      connectStream();
+    // --- Detection overlay with frame-accurate sync ---
+    let startTs = null;   // sensor_timestamp_ns from stream_start event
+    const pending = [];   // {pts, boxes, has_person} waiting for their frame
+    let lastBoxTime = 0;
+
+    function drawBoxes(boxes) {
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 2;
+      ctx.font = '12px monospace';
+      ctx.fillStyle = '#0f0';
+      for (const b of boxes) {
+        const x = b.x1 * W, y = b.y1 * H;
+        const w = (b.x2 - b.x1) * W, h = (b.y2 - b.y1) * H;
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillText((b.confidence * 100).toFixed(0) + '%', x + 2, y - 4);
+      }
+      lastBoxTime = performance.now();
     }
 
-    const evtSource = new EventSource('/events');
-    evtSource.onmessage = (e) => {
+    // Keep canvas dimensions synced to video display size
+    const ro = new ResizeObserver(() => {
+      canvas.width  = video.clientWidth;
+      canvas.height = video.clientHeight;
+    });
+    ro.observe(video);
+
+    // Render loop: draw boxes when video.currentTime reaches their mapped PTS
+    function render() {
+      const t = video.currentTime;
+      let drawn = false;
+      while (pending.length && pending[0].pts <= t) {
+        const d = pending.shift();
+        drawBoxes(d.boxes);
+        drawn = true;
+      }
+      // Fade boxes after 500ms with no new detection
+      if (!drawn && performance.now() - lastBoxTime > 500) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
+
+    // --- SSE ---
+    const sse = new EventSource('/events');
+    sse.addEventListener('stream_start', e => {
+      const d = JSON.parse(e.data);
+      startTs = d.sensor_timestamp_ns;
+    });
+    sse.addEventListener('detection', e => {
+      const d = JSON.parse(e.data);
+      badgePerson.textContent = d.has_person ? 'person detected' : 'no person';
+      badgePerson.className = 'badge' + (d.has_person ? ' green' : '');
+      if (startTs !== null) {
+        d.pts = (d.sensor_timestamp_ns - startTs) / 1e9;
+        pending.push(d);
+        // Evict stale pending entries older than 2s
+        const cutoff = video.currentTime - 2;
+        while (pending.length && pending[0].pts < cutoff) pending.shift();
+      }
+    });
+    sse.addEventListener('audio', e => {
       const { wav_url, text } = JSON.parse(e.data);
       player.src = wav_url;
       player.play().catch(() => {});
       lastGreeting.textContent = '"' + text + '"';
-    };
-    evtSource.onerror = () => {
+    });
+    sse.onerror = () => {
       badgeListener.textContent = 'audio: disconnected';
       badgeListener.className = 'badge red';
     };
-    evtSource.onopen = () => {
+    sse.onopen = () => {
       badgeListener.textContent = 'audio: connected';
       badgeListener.className = 'badge green';
     };
 
+    // --- Status poll ---
     async function pollStatus() {
       try {
         const data = await fetch('/status').then(r => r.json());
-        badgePerson.textContent = data.has_person ? 'person detected' : 'no person';
-        badgePerson.className = 'badge' + (data.has_person ? ' green' : '');
+        if (data.sse_client_count === 0) {
+          badgeListener.textContent = 'audio: no listener';
+          badgeListener.className = 'badge red';
+        }
       } catch (_) {}
     }
     setInterval(pollStatus, 2000);
-    pollStatus();
 
+    // --- Lighting ---
     async function setLighting(preset) {
       const s = document.getElementById('lighting-status');
       s.textContent = 'applying...';
       try {
-        await fetch('/settings/lighting/' + preset, {method: 'POST'});
+        await fetch('/settings/lighting/' + preset, { method: 'POST' });
         s.textContent = '&#10003; ' + preset;
       } catch(_) { s.textContent = 'failed'; }
     }

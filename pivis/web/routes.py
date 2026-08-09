@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from pivis.state import LIGHTING_PRESETS, AppState, Queues
 
@@ -21,14 +21,12 @@ def _attach(queues: Queues, app_state: AppState) -> None:
         return FileResponse(_STATIC_DIR / "index.html")
 
     @router.websocket("/ws/stream")
-    async def ws_stream(websocket: WebSocket, side: bool = False):
+    async def ws_stream(websocket: WebSocket):
         await websocket.accept()
         try:
             while True:
-                jpeg = app_state.latest_side_jpeg if side else app_state.latest_jpeg
-                if jpeg:
-                    await websocket.send_bytes(jpeg)
-                await asyncio.sleep(0.05)  # 20fps
+                chunk = await queues.fmp4_queue.get()
+                await websocket.send_bytes(chunk)
         except (WebSocketDisconnect, Exception):
             pass
 
@@ -36,14 +34,44 @@ def _attach(queues: Queues, app_state: AppState) -> None:
     async def events():
         async def _sse():
             app_state.sse_client_count += 1
+            stream_start_sent = False
             try:
                 while True:
-                    try:
-                        event = await asyncio.wait_for(queues.events.get(), timeout=30.0)
-                        data = json.dumps({"wav_url": event.wav_url, "text": event.text})
-                        yield f"data: {data}\n\n"
-                    except asyncio.TimeoutError:
+                    # Wait for whichever queue has data first
+                    audio_task = asyncio.ensure_future(queues.events.get())
+                    det_task = asyncio.ensure_future(queues.detections.get())
+                    done, pending = await asyncio.wait(
+                        {audio_task, det_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                        timeout=30.0,
+                    )
+                    for t in pending:
+                        t.cancel()
+
+                    if not done:
                         yield ": keepalive\n\n"
+                        continue
+
+                    for t in done:
+                        item = t.result()
+                        from pivis.state import AudioEvent, DetectionEvent
+                        if isinstance(item, AudioEvent):
+                            data = json.dumps({"wav_url": item.wav_url, "text": item.text})
+                            yield f"event: audio\ndata: {data}\n\n"
+                        elif isinstance(item, DetectionEvent):
+                            if not stream_start_sent:
+                                start_data = json.dumps({
+                                    "sensor_timestamp_ns": item.sensor_timestamp_ns,
+                                    "pts_seconds": 0.0,
+                                })
+                                yield f"event: stream_start\ndata: {start_data}\n\n"
+                                stream_start_sent = True
+                            det_data = json.dumps({
+                                "boxes": item.boxes,
+                                "has_person": item.has_person,
+                                "sensor_timestamp_ns": item.sensor_timestamp_ns,
+                            })
+                            yield f"event: detection\ndata: {det_data}\n\n"
             finally:
                 app_state.sse_client_count -= 1
 
@@ -55,14 +83,6 @@ def _attach(queues: Queues, app_state: AppState) -> None:
         if not path.exists() or not path.is_file():
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(path, media_type="audio/wav")
-
-    @router.get("/snapshot")
-    async def snapshot(side: bool = False):
-        jpeg = app_state.latest_side_jpeg if side else app_state.latest_jpeg
-        if jpeg is None:
-            return JSONResponse({"error": "no frame yet"}, status_code=503)
-        return Response(content=jpeg, media_type="image/jpeg",
-                        headers={"Cache-Control": "no-store"})
 
     @router.get("/status")
     async def status():

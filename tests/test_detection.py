@@ -37,7 +37,7 @@ def _pred(cx, cy, w, h, person_conf, other_conf=0.0):
 def test_detect_no_person():
     preds = np.zeros((1, 84, 8400), dtype=np.float32)
     engine = _make_engine_with_mock_session(preds)
-    result = engine.detect(_make_frame())
+    result = engine.detect(_make_frame(), sensor_timestamp_ns=0)
     assert result.has_person is False
     assert result.boxes == []
 
@@ -47,10 +47,18 @@ def test_detect_person():
     preds = np.zeros((1, 84, 8400), dtype=np.float32)
     preds[0, :, 0] = row
     engine = _make_engine_with_mock_session(preds)
-    result = engine.detect(_make_frame())
+    result = engine.detect(_make_frame(), sensor_timestamp_ns=123)
     assert result.has_person is True
     assert len(result.boxes) == 1
     assert result.confidence == pytest.approx(0.9, abs=1e-4)
+    assert result.sensor_timestamp_ns == 123
+
+
+def test_detect_timestamp_propagated():
+    preds = np.zeros((1, 84, 8400), dtype=np.float32)
+    engine = _make_engine_with_mock_session(preds)
+    result = engine.detect(_make_frame(), sensor_timestamp_ns=999_000_000)
+    assert result.sensor_timestamp_ns == 999_000_000
 
 
 def test_detect_below_threshold():

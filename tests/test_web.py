@@ -1,21 +1,17 @@
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
-from pivis.state import AppState, AudioEvent, Queues
-from pivis.web.routes import APIRouter, _attach
-
-# Build a minimal app without triggering vision loop
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pivis.state import AppState, AudioEvent, DetectionEvent, Queues
+from pivis.web.routes import _attach, router
 
 
 def _make_test_app(queues: Queues, app_state: AppState) -> FastAPI:
     app = FastAPI()
     _attach(queues, app_state)
-    from pivis.web.routes import router
     app.include_router(router)
     return app
 
@@ -43,7 +39,7 @@ def test_audio_404_missing(client_ctx):
     assert resp.status_code == 404
 
 
-def test_audio_served(client_ctx, tmp_path):
+def test_audio_served(client_ctx):
     client, _, _ = client_ctx
     wav = Path("tmp/audio/test.wav")
     wav.parent.mkdir(parents=True, exist_ok=True)
@@ -56,14 +52,28 @@ def test_audio_served(client_ctx, tmp_path):
         wav.unlink(missing_ok=True)
 
 
-def test_index_serves_html(client_ctx, tmp_path):
+def test_index_serves_html(client_ctx):
     client, _, _ = client_ctx
-    fake_html = b"<html><body>test</body></html>"
     static = Path(__file__).parent.parent / "pivis/web/static/index.html"
     original = static.read_bytes()
     try:
-        static.write_bytes(fake_html)
+        static.write_bytes(b"<html><body>test</body></html>")
         resp = client.get("/")
         assert resp.status_code == 200
     finally:
-        static.write_bytes(original)  # always restore
+        static.write_bytes(original)
+
+
+def test_lighting_preset_valid(client_ctx):
+    client, _, _ = client_ctx
+    resp = client.post("/settings/lighting/indoor")
+    assert resp.status_code == 200
+    assert resp.json()["preset"] == "indoor"
+
+
+def test_lighting_preset_invalid(client_ctx):
+    client, _, _ = client_ctx
+    resp = client.post("/settings/lighting/ultraviolet")
+    assert resp.status_code == 400
+
+

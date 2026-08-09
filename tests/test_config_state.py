@@ -2,7 +2,7 @@ import asyncio
 import os
 import pytest
 from pivis.config import Settings
-from pivis.state import AppState, AudioEvent, Queues
+from pivis.state import AppState, AudioEvent, DetectionEvent, Queues
 
 
 def test_settings_loads_with_env(monkeypatch):
@@ -36,7 +36,15 @@ def test_audio_event():
     assert ev.text == "Hello!"
 
 
+def test_detection_event():
+    ev = DetectionEvent(boxes=[], has_person=False, sensor_timestamp_ns=42)
+    assert ev.sensor_timestamp_ns == 42
+
+
 def test_queues_created():
     q = Queues()
-    assert q.events.maxsize == 0   # unbounded
-    assert q.controls.maxsize == 0  # unbounded
+    assert q.events.maxsize == 0
+    assert q.controls.maxsize == 0
+    assert q.detections.maxsize == 0
+    assert q.nal_queue.maxsize == 0
+    assert q.fmp4_queue.maxsize == 0

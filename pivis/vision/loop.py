@@ -1,39 +1,28 @@
 import asyncio
 import logging
 import time
-from pathlib import Path
-
-import cv2
-import numpy as np
 
 from pivis.config import Settings
-from pivis.state import AppState, Queues
+from pivis.state import AppState, DetectionEvent, Queues
 from pivis.vision.audio import make_audio_output
-from pivis.vision.camera import Camera, make_camera
-from pivis.vision.detection import BoundingBox, DetectionEngine
+from pivis.vision.camera import make_camera
+from pivis.vision.detection import DetectionEngine
 from pivis.vision.greeting import ClaudeClient, GreetingOrchestrator
 from pivis.vision.tts import TTSEngine
 
 logger = logging.getLogger(__name__)
 
 
-def encode_jpeg(frame: np.ndarray, boxes: list[BoundingBox]) -> tuple[bytes, bytes]:
-    """Returns (annotated_jpeg, side_by_side_jpeg). Does not mutate frame."""
-    h, w = frame.shape[:2]
-    raw_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    ann_bgr = raw_bgr.copy()
-    for box in boxes:
-        x1, y1 = int(box.x1 * w), int(box.y1 * h)
-        x2, y2 = int(box.x2 * w), int(box.y2 * h)
-        cv2.rectangle(ann_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    _, ann_buf = cv2.imencode(".jpg", ann_bgr)
-    _, side_buf = cv2.imencode(".jpg", np.concatenate([raw_bgr, ann_bgr], axis=1))
-    return ann_buf.tobytes(), side_buf.tobytes()
-
-
 async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppState) -> None:
-    camera = make_camera((settings.camera_width, settings.camera_height), settings.stream_fps, settings.camera_analogue_gain)
-    engine = DetectionEngine(confidence_threshold=settings.detection_confidence, input_size=settings.detection_input_size)
+    camera = make_camera(
+        (settings.camera_width, settings.camera_height),
+        settings.stream_fps,
+        settings.camera_analogue_gain,
+    )
+    engine = DetectionEngine(
+        confidence_threshold=settings.detection_confidence,
+        input_size=settings.detection_input_size,
+    )
     tts = TTSEngine(settings.piper_binary, settings.tts_voice_path)
     audio = make_audio_output(settings.audio_output, settings.audio_device)
     claude = ClaudeClient(settings.anthropic_api_key, settings.claude_model)
@@ -45,6 +34,8 @@ async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppStat
 
     engine.load(settings.yolo_model_path)
     camera.start()
+    loop = asyncio.get_event_loop()
+    camera.start_h264(queues.nal_queue, loop)
     logger.info("Vision loop started")
 
     interval_s = settings.detection_interval_ms / 1000
@@ -52,37 +43,48 @@ async def run_vision_loop(settings: Settings, queues: Queues, app_state: AppStat
 
     try:
         while True:
-            frame = await asyncio.get_event_loop().run_in_executor(None, camera.get_frame)
-            if frame is None:
-                await asyncio.sleep(0.05)
-                continue
-
-            # apply any pending camera control changes (e.g. lighting preset)
+            # Apply any pending camera control changes
             while not queues.controls.empty():
                 try:
                     camera.set_controls(queues.controls.get_nowait())
                 except Exception:
                     logger.exception("Failed to apply camera controls")
 
+            lores = await asyncio.get_event_loop().run_in_executor(None, camera.get_lores)
+            if lores is None:
+                await asyncio.sleep(0.05)
+                continue
+
+            lores_frame, sensor_ts_ns = lores
             now = time.monotonic()
-            boxes = []
 
             if now - last_detect_t >= interval_s:
                 last_detect_t = now
                 try:
-                    result = await asyncio.get_event_loop().run_in_executor(None, engine.detect, frame)
-                    boxes = result.boxes
+                    result = await asyncio.get_event_loop().run_in_executor(
+                        None, engine.detect, lores_frame, sensor_ts_ns
+                    )
                     app_state.has_person = result.has_person
-                    asyncio.create_task(orchestrator.on_detection(result, frame))
+                    boxes = [
+                        {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "confidence": b.confidence}
+                        for b in result.boxes
+                    ]
+                    await queues.detections.put(DetectionEvent(
+                        boxes=boxes,
+                        has_person=result.has_person,
+                        sensor_timestamp_ns=sensor_ts_ns,
+                    ))
+                    if result.has_person:
+                        # get_frame() returns full-res RGB for Claude vision API
+                        frame = await asyncio.get_event_loop().run_in_executor(None, camera.get_frame)
+                        if frame is not None:
+                            asyncio.create_task(orchestrator.on_detection(result, frame))
                 except Exception:
                     logger.exception("Detection error")
-
-            jpeg, side_jpeg = encode_jpeg(frame, boxes)
-            app_state.latest_jpeg = jpeg
-            app_state.latest_side_jpeg = side_jpeg
 
             await asyncio.sleep(1 / settings.stream_fps)
 
     finally:
+        camera.stop_h264()
         camera.stop()
         logger.info("Vision loop stopped")

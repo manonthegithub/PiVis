@@ -25,6 +25,7 @@ class DetectionResult:
     boxes: list[BoundingBox] = field(default_factory=list)
     confidence: float = 0.0
     timestamp: float = 0.0
+    sensor_timestamp_ns: int = 0
 
 
 class DetectionEngine:
@@ -46,7 +47,7 @@ class DetectionEngine:
         self._input_name = self._session.get_inputs()[0].name
         logger.info("DetectionEngine loaded: %s", model_path)
 
-    def detect(self, frame: np.ndarray) -> DetectionResult:
+    def detect(self, frame: np.ndarray, sensor_timestamp_ns: int = 0) -> DetectionResult:
         if self._session is None:
             raise RuntimeError("Call load() before detect()")
 
@@ -60,7 +61,7 @@ class DetectionEngine:
             logger.warning("Slow inference: %.0fms", elapsed_ms)
 
         if not boxes:
-            return DetectionResult(has_person=False, timestamp=time.time())
+            return DetectionResult(has_person=False, timestamp=time.time(), sensor_timestamp_ns=sensor_timestamp_ns)
 
         best = max(boxes, key=lambda b: b.confidence)
         return DetectionResult(
@@ -68,6 +69,7 @@ class DetectionEngine:
             boxes=boxes,
             confidence=best.confidence,
             timestamp=time.time(),
+            sensor_timestamp_ns=sensor_timestamp_ns,
         )
 
     def _preprocess(self, frame: np.ndarray) -> np.ndarray:
