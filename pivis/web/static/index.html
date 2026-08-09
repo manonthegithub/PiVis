@@ -59,18 +59,25 @@
     video.src = URL.createObjectURL(ms);
     let sb, sbQueue = [], sbBusy = false;
 
-    const LIVE_LATENCY = 0.15;  // seconds of buffer to keep behind the live edge
+    const LIVE_LATENCY = 0.05;  // seconds of buffer to keep behind the live edge
     function syncToLiveEdge() {
       if (!sb || !sb.buffered.length) return;
       const start = sb.buffered.start(0), end = sb.buffered.end(0);
-      // Seek if playhead is outside buffered range or lagging >0.8s behind live.
-      if (video.currentTime < start || video.currentTime > end + 0.3 || end - video.currentTime > 0.8) {
+      const behind = end - video.currentTime;
+      // Hard-seek only on big desync (outside range or >0.6s behind); a seek
+      // snaps to the nearest keyframe so we avoid doing it constantly.
+      if (video.currentTime < start || video.currentTime > end + 0.3 || behind > 0.6) {
         try { video.currentTime = Math.max(start, end - LIVE_LATENCY); } catch (_) {}
+        video.playbackRate = 1.0;
+      } else {
+        // Small drift: catch up smoothly by speeding playback slightly. This
+        // self-regulates to hug the live edge without visible seeking.
+        video.playbackRate = behind > 0.12 ? 1.15 : 1.0;
       }
-      // Nudge playback rate up slightly when drifting behind to catch up smoothly.
-      video.playbackRate = (end - video.currentTime > 0.4) ? 1.1 : 1.0;
       if (video.paused) video.play().catch(() => {});
     }
+    // Enforce live tracking on a timer, not only on buffer updates.
+    setInterval(syncToLiveEdge, 250);
 
     function sbDrain() {
       if (sbBusy || !sbQueue.length || !sb || sb.updating) return;

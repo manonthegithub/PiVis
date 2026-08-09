@@ -123,8 +123,9 @@ class PiCamera:
         self._nal_output = _make_nal_output(nal_queue, loop)
         # profile="main" matches the browser MediaSource codec string (avc1.4D401E);
         # repeat=True re-emits SPS/PPS with every keyframe so late-joining clients can decode.
-        # iperiod=10 → keyframe every 0.5s at 20fps; gives ffmpeg first IDR quickly
-        self._encoder = H264Encoder(bitrate=1_000_000, repeat=True, profile="main", iperiod=10)
+        # iperiod=5 → keyframe every 0.25s at 20fps; frequent keyframes keep
+        # live-edge seeks cheap (a seek snaps to the nearest prior keyframe).
+        self._encoder = H264Encoder(bitrate=1_000_000, repeat=True, profile="main", iperiod=5)
         self._encoder.output = self._nal_output
         self._cam.start_encoder(self._encoder)
         logger.info("H264Encoder started")

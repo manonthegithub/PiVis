@@ -15,9 +15,9 @@ def _build_ffmpeg_cmd(fps: int = 20) -> list[str]:
         "-c:v", "copy",
         "-f", "mp4",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset",
-        # Emit a fragment every 100ms (not only at keyframes) and flush each
+        # Emit a fragment every 50ms (not only at keyframes) and flush each
         # packet immediately so the browser gets low-latency chunks.
-        "-frag_duration", "100000", "-flush_packets", "1",
+        "-frag_duration", "50000", "-flush_packets", "1",
         "pipe:1",
     ]
 _READ_SIZE = 65_536
