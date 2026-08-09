@@ -3,14 +3,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_FFMPEG_CMD = [
-    "ffmpeg", "-hide_banner", "-loglevel", "warning",
-    "-f", "h264", "-i", "pipe:0",
-    "-c:v", "copy",
-    "-f", "mp4",
-    "-movflags", "frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset",
-    "pipe:1",
-]
+def _build_ffmpeg_cmd(fps: int = 20) -> list[str]:
+    return [
+        "ffmpeg", "-hide_banner", "-loglevel", "warning",
+        "-r", str(fps),          # input framerate so ffmpeg can set PTS on raw H264
+        "-f", "h264", "-i", "pipe:0",
+        "-c:v", "copy",
+        "-r", str(fps),          # output framerate
+        "-f", "mp4",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset",
+        "pipe:1",
+    ]
 _READ_SIZE = 65_536
 
 
@@ -20,9 +23,9 @@ class FMP4Streamer:
     def __init__(self) -> None:
         self._proc: asyncio.subprocess.Process | None = None
 
-    async def start(self) -> None:
+    async def start(self, fps: int = 20) -> None:
         self._proc = await asyncio.create_subprocess_exec(
-            *_FFMPEG_CMD,
+            *_build_ffmpeg_cmd(fps),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -64,10 +67,11 @@ class FMP4Streamer:
 async def run_fmp4_loop(
     nal_queue: asyncio.Queue,
     fmp4_queue: asyncio.Queue,
+    fps: int = 20,
 ) -> None:
     """Read NAL units from nal_queue, remux via ffmpeg, push fMP4 chunks to fmp4_queue."""
     streamer = FMP4Streamer()
-    await streamer.start()
+    await streamer.start(fps)
     chunks_produced = 0
 
     async def _reader() -> None:

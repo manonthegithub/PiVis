@@ -17,7 +17,7 @@ def create_app(settings: Settings, queues: Queues, app_state: AppState) -> FastA
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         vision_task = asyncio.create_task(run_vision_loop(settings, queues, app_state))
-        fmp4_task = asyncio.create_task(run_fmp4_loop(queues.nal_queue, queues.fmp4_queue))
+        fmp4_task = asyncio.create_task(run_fmp4_loop(queues.nal_queue, queues.fmp4_queue, fps=settings.stream_fps))
         logger.info("PiVis started")
         try:
             yield
