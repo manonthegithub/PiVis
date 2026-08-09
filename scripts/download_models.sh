@@ -4,12 +4,16 @@ set -euo pipefail
 MODELS_DIR="$(dirname "$0")/../models"
 mkdir -p "$MODELS_DIR"
 
-# YOLOv8n ONNX
-YOLO_URL="https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
+# YOLOv8n ONNX at 320x320.
+# The prebuilt ultralytics asset is exported at 640x640, which is ~20x slower on
+# the Pi5 CPU (~800ms vs ~40ms/frame). We export at 320 instead — this must match
+# detection_input_size. Requires ultralytics (pulls torch); only needed at setup.
 YOLO_OUT="$MODELS_DIR/yolov8n.onnx"
 if [ ! -f "$YOLO_OUT" ]; then
-  echo "Downloading YOLOv8n ONNX..."
-  wget -q --show-progress -O "$YOLO_OUT" "$YOLO_URL"
+  echo "Exporting YOLOv8n ONNX at 320x320..."
+  python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx', imgsz=320, simplify=True)"
+  mv yolov8n.onnx "$YOLO_OUT"
+  rm -f yolov8n.pt
 else
   echo "YOLOv8n already present, skipping."
 fi

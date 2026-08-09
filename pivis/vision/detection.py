@@ -43,7 +43,7 @@ class DetectionEngine:
         opts = ort.SessionOptions()
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL  # single model, no op-level parallelism
-        opts.intra_op_num_threads = 4  # Pi5 has 4 cores
+        opts.intra_op_num_threads = 3  # leave one of the Pi5's 4 cores for H.264 encoding
         opts.inter_op_num_threads = 1  # sequential mode uses only intra-op threads
         # Cache the fully-optimized graph so subsequent loads reuse it and skip re-optimization.
         optimized_path = model_path.with_suffix(".opt.onnx")

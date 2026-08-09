@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # Detection
     detection_interval_ms: int = 500  # 2 detections/s; leaves CPU headroom for H.264 encoding
     detection_confidence: float = 0.5
-    detection_input_size: int = 640  # must match the ONNX model's fixed input (yolov8n.onnx is 640x640)
+    detection_input_size: int = 320  # must match the ONNX model's fixed input (yolov8n.onnx is 320x320)
     yolo_model_path: Path = Path("models/yolov8n.onnx")
 
     # Greeting
