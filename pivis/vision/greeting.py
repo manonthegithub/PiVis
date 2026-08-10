@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import logging
 import random
@@ -44,7 +45,10 @@ class ClaudeClient:
         self._model = model
 
     async def generate_greeting(self, frame: np.ndarray, person_count: int) -> str:
-        image_b64 = _encode_frame(frame)
+        # JPEG encode is CPU-bound; run it off the event loop so the video stream
+        # (sharing this loop) doesn't stall.
+        loop = asyncio.get_event_loop()
+        image_b64 = await loop.run_in_executor(None, _encode_frame, frame)
         count_str = f"{person_count} person{'s' if person_count > 1 else ''}"
         message = await self._client.messages.create(
             model=self._model,
@@ -103,7 +107,10 @@ class GreetingOrchestrator:
             logger.warning("Claude greeting unavailable, using fallback: %s", exc)
 
         try:
-            wav_path = self._tts.synthesize(text)
+            # Piper runs a blocking subprocess; offload it so the video stream
+            # (same event loop) keeps flowing while speech is synthesized.
+            loop = asyncio.get_event_loop()
+            wav_path = await loop.run_in_executor(None, self._tts.synthesize, text)
             await self._audio.play(wav_path, text, self._queue)
         except Exception:
             logger.exception("TTS/audio failed — no greeting played")
