@@ -13,7 +13,7 @@ _STATIC_DIR = Path(__file__).parent / "static"
 router = APIRouter()
 
 
-def _attach(queues: Queues, app_state: AppState, settings=None, hub=None, pcs=None) -> None:
+def _attach(queues: Queues, app_state: AppState, settings=None, hub=None, pcs=None, event_hub=None) -> None:
     """Inject shared state into route closures."""
     stream_mode = getattr(settings, "stream_mode", "mse")
 
@@ -50,38 +50,28 @@ def _attach(queues: Queues, app_state: AppState, settings=None, hub=None, pcs=No
     @router.get("/events")
     async def events():
         async def _sse():
+            from pivis.state import AudioEvent, DetectionEvent
             app_state.sse_client_count += 1
+            q = event_hub.subscribe()
             try:
                 while True:
-                    # Wait for whichever queue has data first
-                    audio_task = asyncio.ensure_future(queues.events.get())
-                    det_task = asyncio.ensure_future(queues.detections.get())
-                    done, pending = await asyncio.wait(
-                        {audio_task, det_task},
-                        return_when=asyncio.FIRST_COMPLETED,
-                        timeout=30.0,
-                    )
-                    for t in pending:
-                        t.cancel()
-
-                    if not done:
+                    try:
+                        item = await asyncio.wait_for(q.get(), timeout=30.0)
+                    except asyncio.TimeoutError:
                         yield ": keepalive\n\n"
                         continue
-
-                    for t in done:
-                        item = t.result()
-                        from pivis.state import AudioEvent, DetectionEvent
-                        if isinstance(item, AudioEvent):
-                            data = json.dumps({"wav_url": item.wav_url, "text": item.text})
-                            yield f"event: audio\ndata: {data}\n\n"
-                        elif isinstance(item, DetectionEvent):
-                            det_data = json.dumps({
-                                "boxes": item.boxes,
-                                "has_person": item.has_person,
-                                "sensor_timestamp_ns": item.sensor_timestamp_ns,
-                            })
-                            yield f"event: detection\ndata: {det_data}\n\n"
+                    if isinstance(item, AudioEvent):
+                        data = json.dumps({"wav_url": item.wav_url, "text": item.text})
+                        yield f"event: audio\ndata: {data}\n\n"
+                    elif isinstance(item, DetectionEvent):
+                        det_data = json.dumps({
+                            "boxes": item.boxes,
+                            "has_person": item.has_person,
+                            "sensor_timestamp_ns": item.sensor_timestamp_ns,
+                        })
+                        yield f"event: detection\ndata: {det_data}\n\n"
             finally:
+                event_hub.unsubscribe(q)
                 app_state.sse_client_count -= 1
 
         return StreamingResponse(_sse(), media_type="text/event-stream")

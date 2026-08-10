@@ -40,7 +40,6 @@
     <button onclick="setLighting('dim')">&#127769; Dim</button>
     <span id="lighting-status" style="color:#888"></span>
   </div>
-  <audio id="audio-player" autoplay></audio>
 
   <script>
     const video   = document.getElementById('stream');
@@ -50,7 +49,6 @@
     const badgeStream   = document.getElementById('badge-stream');
     const badgeListener = document.getElementById('badge-listener');
     const lastGreeting  = document.getElementById('last-greeting');
-    const player        = document.getElementById('audio-player');
 
     function streamLive() {
       badgeStream.textContent = 'stream: live';
@@ -192,37 +190,44 @@
       badgePerson.className = 'badge' + (d.has_person ? ' green' : '');
       if (d.has_person && d.boxes.length) drawBoxes(d.boxes);
     });
-    // Browsers block audio until a user gesture. Prime the element with a short
-    // silent WAV inside the click so later greeting playback is allowed.
-    const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-    let audioUnlocked = false, pendingUrl = null;
+    // Browsers block audio until a user gesture. Use WebAudio: resume an
+    // AudioContext inside the click, then decode+play greetings through it.
+    // This is more reliable across Safari/Chrome than the <audio> element.
+    let audioCtx = null, pendingUrl = null;
     const enableBtn = document.getElementById('enable-audio');
+
     async function unlockAudio() {
-      if (audioUnlocked) return;
       try {
-        player.src = SILENT_WAV;
-        await player.play();          // real playback inside the gesture = activation
-        audioUnlocked = true;
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        await audioCtx.resume();
         enableBtn.style.display = 'none';
         badgeListener.textContent = 'audio: ready';
         badgeListener.className = 'badge green';
         if (pendingUrl) { playGreeting(pendingUrl); pendingUrl = null; }
       } catch (err) {
         console.error('audio unlock failed:', err);
-        enableBtn.textContent = '🔊 Tap again to enable sound';
       }
     }
     enableBtn.addEventListener('click', unlockAudio);
 
-    function playGreeting(url) {
-      player.src = url;
-      player.play().catch(err => console.error('audio play:', err));
+    async function playGreeting(url) {
+      try {
+        if (!audioCtx || audioCtx.state !== 'running') { pendingUrl = url; return; }
+        const buf = await fetch(url).then(r => r.arrayBuffer());
+        const decoded = await audioCtx.decodeAudioData(buf);
+        const src = audioCtx.createBufferSource();
+        src.buffer = decoded;
+        src.connect(audioCtx.destination);
+        src.start();
+      } catch (err) {
+        console.error('audio play:', err);
+      }
     }
 
     sse.addEventListener('audio', e => {
       const { wav_url, text } = JSON.parse(e.data);
       lastGreeting.textContent = '"' + text + '"';
-      if (!audioUnlocked) {
+      if (!audioCtx || audioCtx.state !== 'running') {
         pendingUrl = wav_url;
         enableBtn.textContent = '🔊 Enable sound (greeting waiting)';
         return;
