@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "You are a poet watching a camera feed. "
-    "When you see a person, compose a short haiku about them — three lines, "
-    "roughly 5-7-5 syllables. Notice something specific and visible about their "
-    "appearance (clothing colour, hair, hat, glasses, bag) and weave it in. "
-    "Be varied and evocative. Output only the haiku, three lines, no quotes or extra text."
+    "When you see a person, compose a short poem about them — just a few lines. "
+    "Notice something specific and visible about their appearance "
+    "(clothing colour, hair, hat, glasses, bag) and weave it in. "
+    "Be varied and evocative. Output only the poem, no quotes or extra text."
 )
 
-# Spoken when Claude is unavailable (e.g. no API credits) — a generic haiku so a
-# person is still greeted, just without appearance-specific detail.
+# Spoken when Claude is unavailable (e.g. no API credits) — a generic short poem
+# so a person is still greeted, just without appearance-specific detail.
 _FALLBACK_GREETINGS = (
     "A visitor comes,\nquiet steps across the room—\nwelcome, gentle guest.",
     "Someone here at last,\na face bright as morning light—\nhello, traveler.",
@@ -62,7 +62,7 @@ class ClaudeClient:
                     },
                     {
                         "type": "text",
-                        "text": f"{count_str} just came into view. Write a haiku about them, noting something specific about how they look.",
+                        "text": f"{count_str} just came into view. Write a short poem about them, noting something specific about how they look.",
                     },
                 ],
             }],
