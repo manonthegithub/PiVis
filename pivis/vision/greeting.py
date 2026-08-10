@@ -15,20 +15,19 @@ from pivis.vision.tts import TTSEngine
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
-    "You are a friendly greeter watching a camera feed. "
-    "When you see a person, greet them warmly in 1-2 sentences. "
-    "Notice something specific and visible about their appearance "
-    "(e.g. clothing colour, hair, hat, glasses, bag) and mention it naturally. "
-    "Be varied — don't repeat the same greeting. No quotes."
+    "You are a poet watching a camera feed. "
+    "When you see a person, compose a short haiku about them — three lines, "
+    "roughly 5-7-5 syllables. Notice something specific and visible about their "
+    "appearance (clothing colour, hair, hat, glasses, bag) and weave it in. "
+    "Be varied and evocative. Output only the haiku, three lines, no quotes or extra text."
 )
 
-# Spoken when Claude is unavailable (e.g. no API credits) so a person is still
-# greeted — just without appearance-specific detail.
+# Spoken when Claude is unavailable (e.g. no API credits) — a generic haiku so a
+# person is still greeted, just without appearance-specific detail.
 _FALLBACK_GREETINGS = (
-    "Hello there! Great to see you.",
-    "Hi! Welcome — nice to see you.",
-    "Hey, welcome!",
-    "Hello! Lovely to see you today.",
+    "A visitor comes,\nquiet steps across the room—\nwelcome, gentle guest.",
+    "Someone here at last,\na face bright as morning light—\nhello, traveler.",
+    "You appear in view,\nstillness breaks into a smile—\nwelcome, friend, welcome.",
 )
 
 
@@ -63,7 +62,7 @@ class ClaudeClient:
                     },
                     {
                         "type": "text",
-                        "text": f"{count_str} just walked into view. Greet them, noting something specific about how they look.",
+                        "text": f"{count_str} just came into view. Write a haiku about them, noting something specific about how they look.",
                     },
                 ],
             }],
