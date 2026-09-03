@@ -16,16 +16,12 @@ spec:
         app: pivis-audio
     spec:
       # Only needed while the ghcr.io/<owner>/pivis/audio package is
-      # private. Create it once with:
-      #   kubectl create secret docker-registry ghcr-pull-secret \
-      #     --namespace pivis \
-      #     --docker-server=ghcr.io \
-      #     --docker-username=<gh-username> \
-      #     --docker-password=<gh-PAT-with-read:packages>
-      # or delete this block once the package's visibility is set to
-      # public in GitHub package settings.
+      # private. Existing cluster secret `ghcr-secret` must exist in the
+      # `pivis` namespace (Secrets are namespace-scoped — copy/recreate it
+      # here if it currently lives elsewhere), or delete this block once
+      # the package's visibility is set to public in GitHub.
       imagePullSecrets:
-        - name: ghcr-pull-secret
+        - name: ghcr-secret
       containers:
         - name: audio
           image: ghcr.io/manonthegithub/pivis/audio:latest
