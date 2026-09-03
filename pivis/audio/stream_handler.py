@@ -112,11 +112,9 @@ class AudioStreamHandler:
         finally:
             # Cleanup
             if stream_id in self.active_streams:
+                frame_count = self.active_streams[stream_id].get("frame_count", 0)
                 del self.active_streams[stream_id]
-                logger.info(
-                    f"Stream {stream_id} closed "
-                    f"({self.active_streams[stream_id].get('frame_count', 0)} frames)"
-                )
+                logger.info(f"Stream {stream_id} closed ({frame_count} frames)")
 
     def _parse_frame(self, data: str, stream_id: str) -> Optional[dict]:
         """Parse incoming audio frame.

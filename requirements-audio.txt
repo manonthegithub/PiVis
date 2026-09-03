@@ -1,0 +1,7 @@
+# Deps for the standalone audio module runner (pivis/audio_app.py).
+# Kept separate from requirements.txt: the main PiVis app runs on real Pi
+# camera hardware and doesn't need Whisper/torch; this runs anywhere.
+fastapi>=0.111
+uvicorn[standard]>=0.29
+openai-whisper>=20231117
+numpy>=1.26
