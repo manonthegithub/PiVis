@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pivis-audio
+  namespace: pivis
+  labels:
+    app: pivis-audio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pivis-audio
+  template:
+    metadata:
+      labels:
+        app: pivis-audio
+    spec:
+      # Only needed while the ghcr.io/<owner>/pivis/audio package is
+      # private. Create it once with:
+      #   kubectl create secret docker-registry ghcr-pull-secret \
+      #     --namespace pivis \
+      #     --docker-server=ghcr.io \
+      #     --docker-username=<gh-username> \
+      #     --docker-password=<gh-PAT-with-read:packages>
+      # or delete this block once the package's visibility is set to
+      # public in GitHub package settings.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: audio
+          image: ghcr.io/manonthegithub/pivis/audio:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: pivis-audio-config
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10

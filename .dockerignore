@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+docs
+tests
+scripts
+k8s
+*.md
+.env
+.env.example
+__pycache__
+*.pyc
+.venv
+models

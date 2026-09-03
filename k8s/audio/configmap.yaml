@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pivis-audio-config
+  namespace: pivis
+data:
+  WHISPER_MODEL: "tiny"

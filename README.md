@@ -66,3 +66,27 @@ ANTHROPIC_API_KEY=test pytest
 ## Environment variables
 
 See `.env.example` for the full list with defaults.
+
+## Audio module — container / k8s deployment
+
+The standalone audio module (`pivis/audio_app.py`, browser mic → WebSocket →
+Whisper STT) has no camera dependency and is built as its own image,
+separate from the main Pi-only app above.
+
+- **Build**: `.github/workflows/docker-build.yml` builds `Dockerfile.audio`
+  and pushes to GHCR (`ghcr.io/<owner>/pivis/audio`) on every push to `main`
+  that touches the audio module, or via manual dispatch. Docker layer
+  caching uses the GitHub Actions cache (`type=gha`), so unchanged layers
+  (deps, the baked-in Whisper model) are reused on subsequent builds instead
+  of rebuilt.
+- **Deploy**: manifests in `k8s/audio/` (`namespace`, `configmap`,
+  `deployment`, `service`) pull the image straight from GHCR:
+  ```bash
+  kubectl apply -f k8s/audio/namespace.yaml
+  kubectl apply -f k8s/audio/
+  ```
+  If the `ghcr.io/<owner>/pivis/audio` package is private, create the pull
+  secret referenced in `k8s/audio/deployment.yaml` first (see the comment
+  there) — or set the package's visibility to public in GitHub and drop the
+  `imagePullSecrets` block.
+- **Local build**: `docker build -f Dockerfile.audio -t pivis-audio .`
