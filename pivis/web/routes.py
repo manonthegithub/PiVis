@@ -16,6 +16,7 @@ router = APIRouter()
 def _attach(queues: Queues, app_state: AppState, settings=None, hub=None, pcs=None, event_hub=None) -> None:
     """Inject shared state into route closures."""
     stream_mode = getattr(settings, "stream_mode", "mse")
+    audio_server_ws_url = getattr(settings, "audio_server_ws_url", "")
 
     @router.get("/")
     async def index():
@@ -23,7 +24,7 @@ def _attach(queues: Queues, app_state: AppState, settings=None, hub=None, pcs=No
 
     @router.get("/config")
     async def config():
-        return {"stream_mode": stream_mode}
+        return {"stream_mode": stream_mode, "audio_server_ws_url": audio_server_ws_url}
 
     @router.post("/webrtc/offer")
     async def webrtc_offer(request: Request):
