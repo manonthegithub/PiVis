@@ -1,8 +1,10 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from pivis.config import Settings
 from pivis.state import AppState, Queues
@@ -13,6 +15,8 @@ from pivis.web.eventhub import EventHub
 from pivis.web.routes import _attach, router
 
 logger = logging.getLogger(__name__)
+
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app(settings: Settings, queues: Queues, app_state: AppState) -> FastAPI:
@@ -52,6 +56,7 @@ def create_app(settings: Settings, queues: Queues, app_state: AppState) -> FastA
             logger.info("PiVis stopped")
 
     app = FastAPI(title="PiVis", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     _attach(queues, app_state, settings=settings, hub=hub, pcs=pcs, event_hub=event_hub)
     app.include_router(router)
     return app
