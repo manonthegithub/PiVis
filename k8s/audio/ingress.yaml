@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pivis-audio
+  namespace: pivis
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: pivis-aud.apps.arpa
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pivis-audio
+                port:
+                  number: 8000
