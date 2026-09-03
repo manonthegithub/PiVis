@@ -32,3 +32,9 @@ class Settings(BaseSettings):
 
     # Stream backend: "webrtc" (real-time) | "mse" (fragmented-MP4 over WebSocket)
     stream_mode: str = "webrtc"
+
+    # Base URL (scheme + host, no trailing slash) of the standalone audio
+    # module (mic -> STT), e.g. "wss://pivis-aud.apps.arpa". The browser
+    # appends /ws/audio/<stream_id>. Empty disables the mic-transcription
+    # UI entirely — the main app has no camera-hardware dependency on it.
+    audio_server_ws_url: str = ""
