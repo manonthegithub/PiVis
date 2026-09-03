@@ -16,8 +16,10 @@
     .badge.green { background: #0a2a0a; color: #0f0; }
     .badge.red { background: #2a0a0a; color: #f55; }
     #last-greeting { font-style: italic; color: #aaa; margin-top: 0.4rem; font-size: 0.85rem; }
+    #transcript { font-style: italic; color: #0af; margin-top: 0.4rem; font-size: 0.85rem; }
     button { background: #222; color: #eee; border: 1px solid #444; padding: 0.2rem 0.6rem; border-radius: 4px; cursor: pointer; font-family: monospace; }
     button:hover { background: #333; }
+    button:disabled { opacity: 0.5; cursor: default; }
   </style>
 </head>
 <body>
@@ -31,8 +33,11 @@
     <span id="badge-stream" class="badge">stream: connecting</span>
     <span id="badge-listener" class="badge">audio: connecting</span>
     <button id="enable-audio">&#128266; Enable sound</button>
+    <span id="badge-mic" class="badge" style="display:none">mic: off</span>
+    <button id="enable-mic" style="display:none">&#127908; Talk to PiVis</button>
   </div>
   <div id="last-greeting"></div>
+  <div id="transcript"></div>
   <div style="margin-top:0.6rem;display:flex;gap:0.5rem;align-items:center;font-size:0.8rem;flex-wrap:wrap;">
     <span style="color:#888">Light:</span>
     <button onclick="setLighting('daylight')">&#9728; Daylight</button>
@@ -41,6 +46,7 @@
     <span id="lighting-status" style="color:#888"></span>
   </div>
 
+  <script src="/static/audio-client.js"></script>
   <script>
     const video   = document.getElementById('stream');
     const canvas  = document.getElementById('overlay');
@@ -139,9 +145,50 @@
       })();
     }
 
+    // --- Mic -> STT (standalone audio server, see k8s/audio/) ---
+    const badgeMic = document.getElementById('badge-mic');
+    const micBtn = document.getElementById('enable-mic');
+    const transcriptEl = document.getElementById('transcript');
+    let audioClient = null;
+
+    function initMic(baseUrl) {
+      badgeMic.style.display = '';
+      micBtn.style.display = '';
+      micBtn.addEventListener('click', async () => {
+        micBtn.disabled = true;
+        badgeMic.textContent = 'mic: connecting';
+        const streamId = 'pivis-' + Date.now().toString(36);
+        audioClient = new AudioClient({
+          serverUrl: baseUrl.replace(/\/$/, '') + '/ws/audio/' + streamId,
+          onConnected: () => {
+            badgeMic.textContent = 'mic: live';
+            badgeMic.className = 'badge green';
+            micBtn.textContent = '⏹ Stop mic';
+            micBtn.disabled = false;
+            audioClient.start();
+          },
+          onError: (msg) => {
+            console.error('mic:', msg);
+            badgeMic.textContent = 'mic: error';
+            badgeMic.className = 'badge red';
+            micBtn.disabled = false;
+          },
+          onTranscription: (msg) => {
+            transcriptEl.textContent = '"' + msg.text + '"';
+          },
+        });
+        try {
+          await audioClient.initialize();
+        } catch (_) {
+          micBtn.disabled = false;
+        }
+      }, { once: true });
+    }
+
     // Pick the backend the server is configured for.
     fetch('/config').then(r => r.json()).then(cfg => {
       if (cfg.stream_mode === 'webrtc') startWebRTC(); else startMSE();
+      if (cfg.audio_server_ws_url) initMic(cfg.audio_server_ws_url);
     }).catch(() => startMSE());
 
     // --- Detection overlay ---
