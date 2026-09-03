@@ -80,7 +80,7 @@ separate from the main Pi-only app above.
   (deps, the baked-in Whisper model) are reused on subsequent builds instead
   of rebuilt.
 - **Deploy**: manifests in `k8s/audio/` (`namespace`, `configmap`,
-  `deployment`, `service`) pull the image straight from GHCR:
+  `deployment`, `service`, `ingress`) pull the image straight from GHCR:
   ```bash
   kubectl apply -f k8s/audio/namespace.yaml
   kubectl apply -f k8s/audio/
@@ -89,4 +89,14 @@ separate from the main Pi-only app above.
   secret referenced in `k8s/audio/deployment.yaml` first (see the comment
   there) — or set the package's visibility to public in GitHub and drop the
   `imagePullSecrets` block.
+- **Expose**: `k8s/audio/ingress.yaml` routes `pivis-aud.apps.arpa` to the
+  service via the cluster's Traefik ingress controller. A reverse proxy in
+  front of the cluster (e.g. the shared nginx instance) forwards that
+  hostname to the Traefik LoadBalancer on the cluster nodes' port 80/443.
+- **Main app wiring**: set `AUDIO_SERVER_WS_URL` (see `.env.example`) on the
+  Pi-hosted main app to the audio module's public base URL, e.g.
+  `wss://pivis-aud.apps.arpa`. The main app's `/config` endpoint exposes it
+  to the browser, which then connects `pivis/web/static/audio-client.js` to
+  `<AUDIO_SERVER_WS_URL>/ws/audio/<stream_id>` for live mic transcription
+  (the "Talk to PiVis" button). Leave it unset to disable that UI.
 - **Local build**: `docker build -f Dockerfile.audio -t pivis-audio .`
