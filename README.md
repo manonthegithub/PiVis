@@ -34,6 +34,15 @@ python -m pivis
 
 Open `http://<pi-ip>:8000` in a browser.
 
+**Mic input ("Talk to PiVis") needs HTTPS.** Browsers only expose
+`navigator.mediaDevices.getUserMedia` in a secure context (HTTPS, or literal
+`localhost`) — plain `http://<pi-ip>:8000` fails with `Cannot read
+properties of undefined (reading 'getUserMedia')`. A reverse proxy
+(the shared nginx instance) fronts the Pi at `https://pivis.apps.arpa` with
+a self-signed cert for this reason; use that URL instead if you want the mic
+button to work. Everything else (video stream, greetings, lighting) works
+fine over plain HTTP too.
+
 ## Audio output
 
 Set `AUDIO_OUTPUT` in `.env`:
@@ -90,13 +99,17 @@ separate from the main Pi-only app above.
   there) — or set the package's visibility to public in GitHub and drop the
   `imagePullSecrets` block.
 - **Expose**: `k8s/audio/ingress.yaml` routes `pivis-aud.apps.arpa` to the
-  service via the cluster's Traefik ingress controller. A reverse proxy in
-  front of the cluster (e.g. the shared nginx instance) forwards that
-  hostname to the Traefik LoadBalancer on the cluster nodes' port 80/443.
-- **Main app wiring**: set `AUDIO_SERVER_WS_URL` (see `.env.example`) on the
-  Pi-hosted main app to the audio module's public base URL, e.g.
-  `wss://pivis-aud.apps.arpa`. The main app's `/config` endpoint exposes it
-  to the browser, which then connects `pivis/web/static/audio-client.js` to
+  service via the cluster's Traefik ingress controller. The shared nginx
+  reverse proxy terminates TLS for `https://pivis-aud.apps.arpa` (self-signed
+  cert, shared with `pivis.apps.arpa` below) and forwards to the Traefik
+  LoadBalancer on the cluster nodes' port 80. TLS here is required, not just
+  nice-to-have: once the main app is HTTPS (see above), browsers block a
+  plain `ws://` connection from an `https://` page as mixed content, so this
+  has to be `wss://`.
+- **Main app wiring**: set `AUDIO_SERVER_WS_URL=wss://pivis-aud.apps.arpa`
+  (see `.env.example`) on the Pi-hosted main app. The main app's `/config`
+  endpoint exposes it to the browser, which then connects
+  `pivis/web/static/audio-client.js` to
   `<AUDIO_SERVER_WS_URL>/ws/audio/<stream_id>` for live mic transcription
-  (the "Talk to PiVis" button). Leave it unset to disable that UI.
+  (the "Talk to PiVis" button, only visible when the setting is non-empty).
 - **Local build**: `docker build -f Dockerfile.audio -t pivis-audio .`
