@@ -24,6 +24,7 @@ class AudioClient {
       onError: options.onError || ((e) => console.error(e)),
       onTranscription: options.onTranscription || (() => {}),
       onLLMResponse: options.onLLMResponse || (() => {}),
+      onProcessing: options.onProcessing || (() => {}),
     };
   }
 
@@ -130,6 +131,11 @@ class AudioClient {
         this.callbacks.onTranscription(message);
       } else if (message.type === "llm_response") {
         this.callbacks.onLLMResponse(message);
+      } else if (message.type === "processing") {
+        // Server accepted a phrase and started transcribing -- this can
+        // take tens of seconds on constrained hardware, so surface it
+        // instead of leaving the UI looking frozen with no feedback.
+        this.callbacks.onProcessing();
       }
     } catch (error) {
       console.error("Failed to parse server message:", error);

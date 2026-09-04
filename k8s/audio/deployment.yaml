@@ -36,7 +36,12 @@ spec:
               cpu: 250m
               memory: 512Mi
             limits:
-              cpu: "1"
+              # Whisper transcription is CPU-bound; capping at 1 core made a
+              # single real phrase take ~40s pinned at 100% (confirmed live)
+              # with the receive loop blocked the whole time, looking like a
+              # hang. Node (babka) has 4 cores with only 2 allocated as
+              # limits cluster-wide, so there's real headroom for this.
+              cpu: "2"
               memory: 1Gi
           livenessProbe:
             httpGet:

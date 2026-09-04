@@ -7,6 +7,7 @@ speech-to-text path, with no camera, no TTS/greeting, and no LLM step for now
 (transcribed text is sent straight back to the browser).
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -39,6 +40,33 @@ stt_service = STTService(backend=WhisperSTT(model_name=_WHISPER_MODEL))
 
 # Per-stream framing/silence-detection state, keyed by stream_id.
 _processors: dict[str, AudioProcessor] = {}
+# In-flight background transcription tasks, keyed by stream_id, so a
+# disconnect can cancel them instead of leaking or writing to a dead socket.
+_pending_tasks: dict[str, set] = {}
+
+
+async def _transcribe_and_reply(stream_id: str, websocket, audio_data: bytes) -> None:
+    """Run STT and deliver the result, off the connection's receive loop.
+
+    Whisper transcription is CPU-bound and can take tens of seconds on this
+    hardware (confirmed live: ~40s pinned at the pod's 1-core CPU limit for
+    a single real phrase). Awaiting it inline in _on_frame used to block
+    that connection from reading any further audio frames for the whole
+    duration -- nothing crashed, but the stream looked completely hung with
+    no feedback. Running it as a background task keeps frames flowing.
+    """
+    try:
+        transcription = await stt_service.transcribe_phrase(audio_data)
+        if transcription.get("error"):
+            await websocket.send_text(
+                json.dumps({"type": "error", "message": transcription["error"]})
+            )
+        else:
+            await websocket.send_text(json.dumps({"type": "transcription", **transcription}))
+    except Exception as e:
+        # Most likely the websocket closed while transcription was still
+        # running -- nothing to deliver to, not worth an error log.
+        logger.debug(f"Stream {stream_id}: couldn't deliver transcription - {e}")
 
 
 async def _on_frame(stream_id: str, frame: dict) -> None:
@@ -57,13 +85,16 @@ async def _on_frame(stream_id: str, frame: dict) -> None:
     for sub_frame in result["frames"]:
         if sub_frame["type"] != "phrase_complete":
             continue
-        transcription = await stt_service.transcribe_phrase(sub_frame["audio_data"])
-        if transcription.get("error"):
-            await websocket.send_text(
-                json.dumps({"type": "error", "message": transcription["error"]})
-            )
-        else:
-            await websocket.send_text(json.dumps({"type": "transcription", **transcription}))
+        # Tell the client transcription has started -- without this, a
+        # 20-40s wait with zero messages is indistinguishable from a hang.
+        await websocket.send_text(json.dumps({"type": "processing"}))
+        task = asyncio.create_task(
+            _transcribe_and_reply(stream_id, websocket, sub_frame["audio_data"])
+        )
+        _pending_tasks.setdefault(stream_id, set()).add(task)
+        task.add_done_callback(
+            lambda t, sid=stream_id: _pending_tasks.get(sid, set()).discard(t)
+        )
 
 
 stream_handler = AudioStreamHandler(frame_callback=_on_frame)
@@ -85,3 +116,5 @@ async def ws_audio(websocket: WebSocket, stream_id: str):
         await stream_handler.handle_connection(websocket, stream_id)
     finally:
         _processors.pop(stream_id, None)
+        for task in _pending_tasks.pop(stream_id, set()):
+            task.cancel()

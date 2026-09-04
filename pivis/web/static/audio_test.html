@@ -41,7 +41,13 @@
       client = new AudioClient({
         onConnected: () => { statusEl.textContent = "recording"; },
         onError: (msg) => log(String(msg), true),
-        onTranscription: (msg) => log(msg.text || "(empty)"),
+        onTranscription: (msg) => {
+          statusEl.textContent = "recording";
+          log(msg.text || "(empty)");
+        },
+        // Whisper transcription can take tens of seconds on this hardware --
+        // without this, that wait looks identical to the page being frozen.
+        onProcessing: () => { statusEl.textContent = "transcribing…"; },
       });
       try {
         await client.initialize();
