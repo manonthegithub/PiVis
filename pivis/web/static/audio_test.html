@@ -6,6 +6,7 @@
   <style>
     body { font-family: system-ui, sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem; }
     button { font-size: 1rem; padding: 0.6rem 1.2rem; margin-right: 0.5rem; }
+    #config { color: #888; font-size: 0.85rem; margin-bottom: 0.5rem; }
     #status { color: #666; margin: 1rem 0; }
     #log { border: 1px solid #ccc; border-radius: 6px; padding: 1rem; min-height: 200px; white-space: pre-wrap; }
     .err { color: #b00020; }
@@ -14,6 +15,7 @@
 <body>
   <h1>PiVis Audio Module</h1>
   <p>Speech-to-text only for now &mdash; talk, pause, and the transcribed phrase appears below.</p>
+  <div id="config">loading config…</div>
   <div>
     <button id="startBtn">Start</button>
     <button id="stopBtn" disabled>Stop</button>
@@ -23,10 +25,26 @@
 
   <script src="/static/audio-client.js"></script>
   <script>
+    const configEl = document.getElementById("config");
     const statusEl = document.getElementById("status");
     const logEl = document.getElementById("log");
     const startBtn = document.getElementById("startBtn");
     const stopBtn = document.getElementById("stopBtn");
+
+    // WHISPER_MODEL/MIN_SILENCE_DURATION_MS/BEAM_SIZE are all switchable
+    // live via the k8s ConfigMap without a rebuild -- surface what's
+    // actually running so it's not a guessing game after a config change.
+    async function loadConfig() {
+      try {
+        const resp = await fetch("/healthz");
+        const data = await resp.json();
+        configEl.textContent =
+          `model: ${data.whisper_model} | silence: ${data.min_silence_duration_ms}ms | beam: ${data.beam_size}`;
+      } catch (e) {
+        configEl.textContent = "config unavailable";
+      }
+    }
+    loadConfig();
 
     function log(text, isError) {
       const line = document.createElement("div");
@@ -38,6 +56,7 @@
     let client = null;
 
     startBtn.onclick = async () => {
+      loadConfig(); // refresh in case the model/config changed since page load
       client = new AudioClient({
         onConnected: () => { statusEl.textContent = "recording"; },
         onError: (msg) => log(String(msg), true),
