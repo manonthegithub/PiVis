@@ -25,7 +25,11 @@ class WhisperSTT(STTBackend):
     """Whisper-based STT (local or API)."""
 
     def __init__(
-        self, model_name: str = "base", api_key: Optional[str] = None, beam_size: int = 5
+        self,
+        model_name: str = "base",
+        api_key: Optional[str] = None,
+        beam_size: int = 5,
+        cpu_threads: int = 0,
     ):
         """Initialize Whisper STT.
 
@@ -36,8 +40,10 @@ class WhisperSTT(STTBackend):
                 size fails to load rather than downloading at startup.
             api_key: OpenAI API key for cloud API (None = local model)
             beam_size: whisper's own default is 5; greedy (1) trades
-                accuracy for latency. Configurable via BEAM_SIZE in
-                k8s/audio/configmap.yaml.
+                accuracy for latency. Configurable via BEAM_SIZE.
+            cpu_threads: 0 = let CTranslate2 auto-detect, which can
+                under-provision relative to an explicit container CPU
+                limit. Configurable via CPU_THREADS.
         """
         self.model_name = model_name
         self.api_key = api_key
@@ -64,8 +70,15 @@ class WhisperSTT(STTBackend):
                 # 9-13s under node contention). CTranslate2 is typically
                 # 3-4x faster for CPU inference at the same model size.
                 # int8 quantization trades a little accuracy for further
-                # CPU speedup, reasonable on this hardware.
-                self.local_model = WhisperModel(model_name, device="cpu", compute_type="int8")
+                # CPU speedup, reasonable on this hardware. cpu_threads=0
+                # means "auto-detect", which can under-provision relative
+                # to an explicit container CPU limit -- pin it when set.
+                self.local_model = WhisperModel(
+                    model_name,
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_threads=cpu_threads,
+                )
                 logger.info(f"Loaded local faster-whisper model: {model_name}")
             except ImportError:
                 logger.warning("faster-whisper not installed; falling back to API mode")
@@ -105,6 +118,15 @@ class WhisperSTT(STTBackend):
             audio_data,
             language=language if language != "auto" else None,
             beam_size=self.beam_size,
+            # Without this, whisper always produces *some* text for the
+            # given audio duration even when there's no real speech --
+            # confirmed repeatedly in testing (pure tone/silence
+            # transcribed as "You", "Thanks for watching!", etc., each
+            # with a deceptively high confidence). VAD pre-screens for
+            # actual speech first; segments genuinely have no speech now
+            # come back empty rather than hallucinated, hitting the same
+            # empty-segments path already guarded below.
+            vad_filter=True,
         )
         segments = list(segments)  # materialize the generator (this is where inference runs)
         text = "".join(s.text for s in segments).strip()

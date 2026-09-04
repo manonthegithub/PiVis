@@ -37,13 +37,18 @@ _STATIC_DIR = Path(__file__).parent / "web" / "static"
 _WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "tiny")
 _MIN_SILENCE_DURATION_MS = int(os.environ.get("MIN_SILENCE_DURATION_MS", "450"))
 _BEAM_SIZE = int(os.environ.get("BEAM_SIZE", "5"))
+# 0 = let CTranslate2 auto-detect, which can under-provision relative to an
+# explicit container CPU limit (docker-compose.yml's deploy.resources.cpus).
+_CPU_THREADS = int(os.environ.get("CPU_THREADS", "0"))
 
 app = FastAPI(title="PiVis Audio Module")
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 # Loaded once at import time (module download is baked into the image at
 # build time so pod startup doesn't need network access).
-stt_service = STTService(backend=WhisperSTT(model_name=_WHISPER_MODEL, beam_size=_BEAM_SIZE))
+stt_service = STTService(
+    backend=WhisperSTT(model_name=_WHISPER_MODEL, beam_size=_BEAM_SIZE, cpu_threads=_CPU_THREADS)
+)
 
 # Per-stream framing/silence-detection state, keyed by stream_id.
 _processors: dict[str, AudioProcessor] = {}
@@ -135,6 +140,7 @@ async def healthz():
         "whisper_model": _WHISPER_MODEL,
         "min_silence_duration_ms": _MIN_SILENCE_DURATION_MS,
         "beam_size": _BEAM_SIZE,
+        "cpu_threads": _CPU_THREADS,
     }
 
 

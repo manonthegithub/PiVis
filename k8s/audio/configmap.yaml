@@ -3,6 +3,10 @@ kind: ConfigMap
 metadata:
   name: pivis-audio-config
   namespace: pivis
+  # NOTE: this k3s deployment is a fallback as of 2026-09-04 -- the primary
+  # audio module now runs on zhuchka (/opt/pivis-audio/docker-compose.yml,
+  # nginx's pivis-aud.apps.arpa vhost points there), CPU inference alone is
+  # ~25x faster there. See MEMORY.md for the full migration writeup.
 data:
   # Must be one of the sizes baked into the image (see Dockerfile.audio's
   # WHISPER_MODELS_TO_BAKE build arg, currently "tiny base small") --
