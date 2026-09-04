@@ -74,6 +74,27 @@ class TestAudioProcessor:
         assert len(processor.buffer) == 0
         assert not processor.in_phrase
 
+    def test_first_utterance_completes_without_leading_silence(self):
+        """Regression test: a fresh processor used to require >=300ms of
+        silence *before* the first utterance to ever set in_phrase=True
+        (silence_duration_ms started at 0, not the threshold), so speaking
+        immediately after connecting never produced a phrase_complete event
+        at all. Confirmed live via a real WebSocket test against the
+        deployed audio module before this fix."""
+        processor = AudioProcessor(frame_duration_ms=20, min_silence_duration_ms=300)
+        speech_frame = struct.pack("<%dh" % processor.frame_size, *([10000] * processor.frame_size))
+        silence_frame = struct.pack("<%dh" % processor.frame_size, *([0] * processor.frame_size))
+
+        got_phrase = False
+        for i in range(10):  # ~200ms of speech, no silence beforehand
+            result = processor.process_frame(speech_frame, f"speech-{i}")
+            got_phrase |= any(f["type"] == "phrase_complete" for f in result["frames"])
+        for i in range(20):  # >300ms of trailing silence closes the phrase
+            result = processor.process_frame(silence_frame, f"silence-{i}")
+            got_phrase |= any(f["type"] == "phrase_complete" for f in result["frames"])
+
+        assert got_phrase, "first utterance after connecting never completed as a phrase"
+
 
 class TestSTTService:
     """Tests for STT service."""
@@ -124,6 +145,30 @@ class TestSTTService:
 
         assert result["text"] == "hello"
         assert mock_backend.transcribe.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_whisper_local_handles_no_speech_segments(self):
+        """Regression test: Whisper returns `segments: []` (present, just
+        empty) rather than omitting the key whenever a phrase has no
+        detected speech. `result.get("segments", [{}])[0]` only guards a
+        *missing* key, so `[][0]` raised IndexError on every such phrase —
+        confirmed live: a real phrase sent to the deployed audio module
+        failed all 3 retries with "list index out of range" before this
+        fix."""
+        stt = WhisperSTT.__new__(WhisperSTT)  # skip __init__'s real model load
+        stt.model_name = "tiny"
+        stt.api_key = None
+        stt.local_model = Mock()
+        stt.local_model.transcribe = Mock(
+            return_value={"text": "", "segments": [], "language": "en"}
+        )
+
+        audio_bytes = struct.pack("<160h", *[0] * 160)
+        result = await stt.transcribe(audio_bytes)
+
+        assert result.get("error") is None
+        assert result["text"] == ""
+        assert result["confidence"] == 0.0
 
 
 class TestLLMService:

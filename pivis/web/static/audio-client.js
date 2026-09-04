@@ -11,7 +11,12 @@ class AudioClient {
     this.processor = null;
     this.isRecording = false;
     this.streamId = options.streamId || this.generateStreamId();
-    this.serverUrl = options.serverUrl || `ws://${window.location.host}/ws/audio/${this.streamId}`;
+    // wss:// when the page itself is https:// — a plain ws:// call from an
+    // https:// page is blocked by browsers as mixed content before it ever
+    // reaches the network (this is what was breaking it behind the nginx
+    // TLS terminator in front of pivis-aud.apps.arpa).
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    this.serverUrl = options.serverUrl || `${wsProtocol}//${window.location.host}/ws/audio/${this.streamId}`;
     this.sampleRate = options.sampleRate || 16000;
     this.chunkDurationMs = options.chunkDurationMs || 100;
     this.callbacks = {

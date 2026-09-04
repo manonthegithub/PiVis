@@ -35,9 +35,16 @@ class AudioProcessor:
         self.frame_size = int(sample_rate * frame_duration_ms / 1000)
         self.bytes_per_sample = 2  # 16-bit audio
 
-        # State tracking
+        # State tracking. silence_duration_ms starts "pre-satisfied" at the
+        # threshold: a fresh stream has no prior audio, so it's reasonable to
+        # treat it as already-silent. Starting at 0 meant the very first
+        # utterance after connecting could never set in_phrase=True (that
+        # only happens when silence_duration_ms >= min_silence_duration_ms
+        # *before* speech starts), so it silently never completed as a
+        # phrase — confirmed live: tone-then-silence right after connect
+        # produced zero server-side phrase_complete events.
         self.buffer = bytearray()
-        self.silence_duration_ms = 0
+        self.silence_duration_ms = min_silence_duration_ms
         self.in_phrase = False
         self.current_phrase = bytearray()
         self.frame_count = 0
@@ -195,7 +202,7 @@ class AudioProcessor:
     def reset(self) -> None:
         """Reset processor state."""
         self.buffer = bytearray()
-        self.silence_duration_ms = 0
+        self.silence_duration_ms = self.min_silence_duration_ms
         self.in_phrase = False
         self.current_phrase = bytearray()
         self.frame_count = 0

@@ -91,9 +91,14 @@ class WhisperSTT(STTBackend):
                 timeout=30.0,
             )
 
+            # Whisper always includes "segments", but it's `[]` (not missing)
+            # when no speech is detected in the phrase — `.get(..., [{}])`
+            # only guards a missing key, so `[][0]` still raises IndexError
+            # on every no-speech phrase. Fall back explicitly instead.
+            segments = result.get("segments") or [{}]
             return {
                 "text": result.get("text", "").strip(),
-                "confidence": result.get("segments", [{}])[0].get("no_speech_prob", 0.0),
+                "confidence": segments[0].get("no_speech_prob", 0.0),
                 "language": result.get("language", language),
             }
         except asyncio.TimeoutError:
