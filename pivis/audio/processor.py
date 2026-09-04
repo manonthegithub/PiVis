@@ -1,9 +1,10 @@
 """Audio processor for real-time framing and silence detection."""
 
 import logging
-import struct
 from typing import Optional, List, Tuple
 from collections import deque
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,14 @@ class AudioProcessor:
             frame_id: Original frame ID
 
         Returns:
-            Processed frame dict or None
+            A "phrase_complete" dict when this frame closes out a phrase,
+            else None. Used to build an "audio_frame" dict on every call
+            regardless -- but process_frame's only caller (_on_frame in
+            audio_app.py) discards everything except phrase_complete, so
+            >90% of those dict allocations (one per 20ms subframe, ~13x per
+            incoming WebSocket message) were pure waste on the main event
+            loop. Buffering (self.current_phrase.extend below) is unchanged;
+            only the unused return value construction is gone.
         """
         if is_silence:
             self.silence_duration_ms += self.frame_duration_ms
@@ -151,14 +159,7 @@ class AudioProcessor:
             self.silence_duration_ms = 0
             self.current_phrase.extend(frame_bytes)
 
-        return {
-            "type": "audio_frame",
-            "audio_data": frame_bytes,
-            "rms": rms,
-            "is_silence": is_silence,
-            "in_phrase": self.in_phrase,
-            "frame_id": frame_id,
-        }
+        return None
 
     def _calculate_rms(self, audio_bytes: bytes) -> float:
         """Calculate RMS (Root Mean Square) amplitude.
@@ -173,18 +174,16 @@ class AudioProcessor:
             return 0.0
 
         try:
-            # Unpack 16-bit signed samples
-            samples = struct.unpack(
-                f"<{len(audio_bytes) // 2}h",  # Little-endian signed shorts
-                audio_bytes,
-            )
-
-            # Calculate RMS
-            sum_squares = sum(s ** 2 for s in samples)
-            rms = (sum_squares / len(samples)) ** 0.5
+            # Vectorized (numpy, C-level) rather than a pure-Python
+            # struct.unpack + sum(s**2 for s in samples) loop -- this runs
+            # once per 20ms subframe, ~13x per incoming WebSocket message,
+            # on the main event loop (not the executor thread pool whisper
+            # inference uses), for every active connection continuously.
+            samples = np.frombuffer(audio_bytes, dtype="<i2").astype(np.float64)
+            rms = np.sqrt(np.mean(np.square(samples)))
 
             # Normalize to 0-1 range (16-bit max is 32768)
-            return rms / 32768.0
+            return float(rms) / 32768.0
 
         except Exception as e:
             logger.error(f"RMS calculation error: {e}")

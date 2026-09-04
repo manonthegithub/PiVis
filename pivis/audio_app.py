@@ -88,13 +88,16 @@ async def _transcribe_and_reply(
 
 
 async def _on_frame(stream_id: str, frame: dict) -> None:
-    processor = _processors.setdefault(
-        stream_id,
-        AudioProcessor(
+    # dict.setdefault(key, AudioProcessor(...)) would construct a new
+    # AudioProcessor on *every* call regardless of whether the key already
+    # exists -- Python evaluates the default-value argument eagerly before
+    # checking the key. Only build one on the first frame of a stream.
+    processor = _processors.get(stream_id)
+    if processor is None:
+        processor = _processors[stream_id] = AudioProcessor(
             sample_rate=frame.get("sample_rate", 16000),
             min_silence_duration_ms=_MIN_SILENCE_DURATION_MS,
-        ),
-    )
+        )
     result = processor.process_frame(frame["audio_data"], frame["frame_id"])
     if not result:
         return
