@@ -10,8 +10,13 @@ data:
   # downloading at startup. To switch: edit this value, then
   # `kubectl rollout restart deployment/pivis-audio -n pivis`. No rebuild
   # needed as long as the size is already baked in. Measured on this
-  # hardware (ARM, int8): tiny ~0.6-0.9s/phrase, base ~22s/phrase.
-  WHISPER_MODEL: "tiny"
+  # hardware (ARM, int8, clean/no-contention runs): tiny ~0.6-0.9s/phrase,
+  # small ~7.5s/phrase, base ~21-22s/phrase -- base is *slower* than small
+  # despite being the smaller model, reproducible across repeated clean
+  # runs; likely CTranslate2's int8 kernels vectorizing less favorably for
+  # base's specific layer shapes on this ARM CPU. small currently looks
+  # like the best accuracy/speed tradeoff of the three.
+  WHISPER_MODEL: "small"
   # Silence duration (ms) that closes out a phrase as a sentence boundary.
   # Was 300ms (split long sentences into too many segments); tried 600ms,
   # user reported it made accuracy worse (likely more in-segment silence
