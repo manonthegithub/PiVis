@@ -26,6 +26,13 @@ RUN chown -R appuser:appuser /app
 USER appuser
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"
 
+# Set only after the bake step (which needs network to actually download the
+# model) -- confirmed live: without this, the model is baked in but
+# huggingface_hub still makes a live revision-check API call on every pod
+# startup, undermining the "no network needed at startup" point of baking
+# it in, and turning a HF outage into a pod-start failure.
+ENV HF_HUB_OFFLINE=1
+
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
     CMD curl -f http://localhost:8000/healthz || exit 1
