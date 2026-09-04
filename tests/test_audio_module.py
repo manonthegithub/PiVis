@@ -3,6 +3,7 @@
 import pytest
 import asyncio
 import struct
+from types import SimpleNamespace
 from unittest.mock import Mock, AsyncMock, patch
 
 from pivis.audio import AudioStreamHandler, AudioProcessor
@@ -148,21 +149,19 @@ class TestSTTService:
 
     @pytest.mark.asyncio
     async def test_whisper_local_handles_no_speech_segments(self):
-        """Regression test: Whisper returns `segments: []` (present, just
-        empty) rather than omitting the key whenever a phrase has no
-        detected speech. `result.get("segments", [{}])[0]` only guards a
-        *missing* key, so `[][0]` raised IndexError on every such phrase —
-        confirmed live: a real phrase sent to the deployed audio module
-        failed all 3 retries with "list index out of range" before this
-        fix."""
+        """Regression test: faster-whisper (like openai-whisper before it)
+        returns an empty segments sequence -- not missing, just empty --
+        whenever a phrase has no detected speech. `segments[0]` without a
+        guard raised IndexError on every such phrase before this fix
+        (confirmed live against the openai-whisper backend originally;
+        preserved here for the current faster-whisper backend)."""
         stt = WhisperSTT.__new__(WhisperSTT)  # skip __init__'s real model load
         stt.model_name = "tiny"
         stt.api_key = None
         stt._infer_lock = asyncio.Lock()
         stt.local_model = Mock()
-        stt.local_model.transcribe = Mock(
-            return_value={"text": "", "segments": [], "language": "en"}
-        )
+        # faster-whisper returns (segments_generator, info), not a dict.
+        stt.local_model.transcribe = Mock(return_value=(iter([]), SimpleNamespace(language="en")))
 
         audio_bytes = struct.pack("<160h", *[0] * 160)
         result = await stt.transcribe(audio_bytes)
@@ -200,7 +199,8 @@ class TestSTTService:
 
             time.sleep(0.05)  # simulate real inference taking a moment
             concurrent_calls -= 1
-            return {"text": "hi", "segments": [{"no_speech_prob": 0.1}], "language": "en"}
+            segment = SimpleNamespace(text="hi", no_speech_prob=0.1)
+            return iter([segment]), SimpleNamespace(language="en")
 
         stt.local_model.transcribe = fake_transcribe
 

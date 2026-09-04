@@ -47,11 +47,19 @@ class WhisperSTT(STTBackend):
 
         if not api_key:
             try:
-                import whisper
-                self.local_model = whisper.load_model(model_name)
-                logger.info(f"Loaded local Whisper model: {model_name}")
+                from faster_whisper import WhisperModel
+
+                # faster-whisper (CTranslate2), not openai-whisper: confirmed
+                # live that transcription itself was the main source of
+                # latency (~2s/phrase baseline on this ARM node, spiking to
+                # 9-13s under node contention). CTranslate2 is typically
+                # 3-4x faster for CPU inference at the same model size.
+                # int8 quantization trades a little accuracy for further
+                # CPU speedup, reasonable on this hardware.
+                self.local_model = WhisperModel(model_name, device="cpu", compute_type="int8")
+                logger.info(f"Loaded local faster-whisper model: {model_name}")
             except ImportError:
-                logger.warning("Whisper not installed; falling back to API mode")
+                logger.warning("faster-whisper not installed; falling back to API mode")
 
     async def transcribe(self, audio_bytes: bytes, language: str = "en") -> Dict:
         """Transcribe audio using Whisper.
@@ -77,9 +85,32 @@ class WhisperSTT(STTBackend):
                 "error": str(e),
             }
 
+    def _run_faster_whisper(self, audio_data, language: str) -> Dict:
+        """Runs in the executor thread: consume faster-whisper's segment
+        generator there, not on the event loop thread, and return a plain
+        dict -- faster-whisper's Segment objects aren't awaitable/picklable
+        concerns, but consuming the generator IS the actual transcription
+        work and must stay off the event loop.
+        """
+        segments, info = self.local_model.transcribe(
+            audio_data,
+            language=language if language != "auto" else None,
+            beam_size=1,  # greedy-ish decode: favor latency over the last bit of accuracy
+        )
+        segments = list(segments)  # materialize the generator (this is where inference runs)
+        text = "".join(s.text for s in segments).strip()
+        # faster-whisper's no_speech_prob lives per-segment, same as
+        # openai-whisper -- empty segments (no speech detected) previously
+        # crashed here with an IndexError on `[][0]`; guard the same way.
+        no_speech_prob = segments[0].no_speech_prob if segments else 0.0
+        return {
+            "text": text,
+            "confidence": no_speech_prob,
+            "language": info.language or language,
+        }
+
     async def _transcribe_local(self, audio_bytes: bytes, language: str) -> Dict:
         """Transcribe using local Whisper model."""
-        import io
         import numpy as np
 
         try:
@@ -92,27 +123,10 @@ class WhisperSTT(STTBackend):
             loop = asyncio.get_event_loop()
             async with self._infer_lock:
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        lambda: self.local_model.transcribe(
-                            audio_data,
-                            language=language if language != "auto" else None,
-                            fp16=False,
-                        ),
-                    ),
+                    loop.run_in_executor(None, self._run_faster_whisper, audio_data, language),
                     timeout=30.0,
                 )
-
-            # Whisper always includes "segments", but it's `[]` (not missing)
-            # when no speech is detected in the phrase — `.get(..., [{}])`
-            # only guards a missing key, so `[][0]` still raises IndexError
-            # on every no-speech phrase. Fall back explicitly instead.
-            segments = result.get("segments") or [{}]
-            return {
-                "text": result.get("text", "").strip(),
-                "confidence": segments[0].get("no_speech_prob", 0.0),
-                "language": result.get("language", language),
-            }
+            return result
         except asyncio.TimeoutError:
             logger.error("Local Whisper transcription timeout")
             return {

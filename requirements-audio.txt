@@ -3,5 +3,10 @@
 # camera hardware and doesn't need Whisper/torch; this runs anywhere.
 fastapi>=0.111
 uvicorn[standard]>=0.29
-openai-whisper>=20231117
+# faster-whisper (CTranslate2), not openai-whisper: confirmed live that
+# transcription was the main source of latency (~2s/phrase baseline on this
+# ARM node, spiking to 9-13s under node contention -- babka also runs
+# postgres/rabbitmq/the whole Prometheus+Loki stack). CTranslate2 is
+# typically 3-4x faster for CPU inference at the same model size.
+faster-whisper>=1.0
 numpy>=1.26
