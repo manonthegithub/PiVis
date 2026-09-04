@@ -48,6 +48,22 @@
         // Whisper transcription can take tens of seconds on this hardware --
         // without this, that wait looks identical to the page being frozen.
         onProcessing: () => { statusEl.textContent = "transcribing…"; },
+        // A dropped connection (server restart, network blip) used to kill
+        // the stream for good with no way back short of reloading the page.
+        onReconnecting: (attempt, max) => {
+          statusEl.textContent = `reconnecting… (${attempt}/${max})`;
+          log(`Connection lost, reconnecting (attempt ${attempt}/${max})…`, true);
+        },
+        onReconnected: () => {
+          statusEl.textContent = "recording";
+          log("Reconnected.");
+        },
+        onReconnectFailed: () => {
+          statusEl.textContent = "disconnected";
+          log("Reconnect attempts exhausted -- click Start to try again.", true);
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+        },
       });
       try {
         await client.initialize();

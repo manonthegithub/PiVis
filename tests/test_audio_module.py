@@ -158,6 +158,7 @@ class TestSTTService:
         stt = WhisperSTT.__new__(WhisperSTT)  # skip __init__'s real model load
         stt.model_name = "tiny"
         stt.api_key = None
+        stt._infer_lock = asyncio.Lock()
         stt.local_model = Mock()
         stt.local_model.transcribe = Mock(
             return_value={"text": "", "segments": [], "language": "en"}
@@ -169,6 +170,51 @@ class TestSTTService:
         assert result.get("error") is None
         assert result["text"] == ""
         assert result["confidence"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_concurrent_transcribe_calls_are_serialized(self):
+        """Regression test: whisper's model isn't safe for concurrent
+        .transcribe() calls from multiple threads. Once _on_frame started
+        running each phrase's transcription as its own background task,
+        overlapping phrases could call the shared model concurrently --
+        confirmed live: two calls landing ~16ms apart produced corrupted
+        internal state (a zero-element tensor reshape error, then a raw
+        nn.Linear object surfacing as an error message) and the pod was
+        OOMKilled shortly after from concurrent inferences stacking up.
+        _infer_lock must keep calls to the shared model serialized even
+        when multiple transcribe() coroutines are in flight at once."""
+        stt = WhisperSTT.__new__(WhisperSTT)
+        stt.model_name = "tiny"
+        stt.api_key = None
+        stt._infer_lock = asyncio.Lock()
+        stt.local_model = Mock()
+
+        concurrent_calls = 0
+        max_concurrent = 0
+
+        def fake_transcribe(audio_data, **kwargs):
+            nonlocal concurrent_calls, max_concurrent
+            concurrent_calls += 1
+            max_concurrent = max(max_concurrent, concurrent_calls)
+            import time
+
+            time.sleep(0.05)  # simulate real inference taking a moment
+            concurrent_calls -= 1
+            return {"text": "hi", "segments": [{"no_speech_prob": 0.1}], "language": "en"}
+
+        stt.local_model.transcribe = fake_transcribe
+
+        audio_bytes = struct.pack("<160h", *[100] * 160)
+        await asyncio.gather(
+            stt.transcribe(audio_bytes),
+            stt.transcribe(audio_bytes),
+            stt.transcribe(audio_bytes),
+        )
+
+        assert max_concurrent == 1, (
+            f"expected transcribe() calls to be serialized, but "
+            f"{max_concurrent} ran concurrently"
+        )
 
 
 class TestLLMService:

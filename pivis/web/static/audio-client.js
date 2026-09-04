@@ -19,12 +19,26 @@ class AudioClient {
     this.serverUrl = options.serverUrl || `${wsProtocol}//${window.location.host}/ws/audio/${this.streamId}`;
     this.sampleRate = options.sampleRate || 16000;
     this.chunkDurationMs = options.chunkDurationMs || 100;
+    // A closed WebSocket (server restart, network blip, etc.) used to kill
+    // the stream for good with no way back short of reloading the page --
+    // confirmed live: an unrelated server-side OOM crash took the
+    // connection down mid-session and it just never came back. The mic
+    // capture (getUserMedia/AudioContext/processor) stays alive across a
+    // reconnect, so only the socket needs re-establishing.
+    this.maxReconnectAttempts = options.maxReconnectAttempts ?? 5;
+    this.reconnectDelayMs = options.reconnectDelayMs ?? 1000;
+    this._reconnectAttempts = 0;
+    this._reconnecting = false;
+    this._userInitiatedDisconnect = false;
     this.callbacks = {
       onConnected: options.onConnected || (() => {}),
       onError: options.onError || ((e) => console.error(e)),
       onTranscription: options.onTranscription || (() => {}),
       onLLMResponse: options.onLLMResponse || (() => {}),
       onProcessing: options.onProcessing || (() => {}),
+      onReconnecting: options.onReconnecting || (() => {}),
+      onReconnected: options.onReconnected || (() => {}),
+      onReconnectFailed: options.onReconnectFailed || (() => {}),
     };
   }
 
@@ -79,6 +93,7 @@ class AudioClient {
 
         this.ws.onopen = () => {
           console.log("WebSocket connected");
+          this._reconnectAttempts = 0;
           resolve();
         };
 
@@ -90,11 +105,37 @@ class AudioClient {
         this.ws.onclose = () => {
           console.log("WebSocket closed");
           this.isRecording = false;
+          this._scheduleReconnect();
         };
       } catch (error) {
         reject(error);
       }
     });
+  }
+
+  _scheduleReconnect() {
+    if (this._userInitiatedDisconnect || this._reconnecting) return;
+    if (this._reconnectAttempts >= this.maxReconnectAttempts) {
+      this.callbacks.onReconnectFailed();
+      return;
+    }
+    this._reconnecting = true;
+    this._reconnectAttempts++;
+    const delay = this.reconnectDelayMs * this._reconnectAttempts; // linear backoff
+    this.callbacks.onReconnecting(this._reconnectAttempts, this.maxReconnectAttempts);
+
+    setTimeout(async () => {
+      this._reconnecting = false;
+      if (this._userInitiatedDisconnect) return;
+      try {
+        await this.connectWebSocket();
+        this.isRecording = true;
+        this.callbacks.onReconnected();
+      } catch (e) {
+        // connectWebSocket's own onclose handler re-schedules the next
+        // attempt; nothing further to do here.
+      }
+    }, delay);
   }
 
   handleAudioFrame(event) {
@@ -177,6 +218,7 @@ class AudioClient {
   }
 
   disconnect() {
+    this._userInitiatedDisconnect = true;
     this.stop();
 
     if (this.processor) {

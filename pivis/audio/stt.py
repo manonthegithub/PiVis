@@ -34,6 +34,16 @@ class WhisperSTT(STTBackend):
         self.model_name = model_name
         self.api_key = api_key
         self.local_model = None
+        # Whisper's model isn't safe for concurrent .transcribe() calls from
+        # multiple threads -- confirmed live: overlapping phrases each ran
+        # transcription as their own background task, and two calls landing
+        # ~16ms apart produced corrupted-state errors (a zero-element tensor
+        # reshape, then a raw nn.Linear object surfacing as an error
+        # message) followed by the pod getting OOMKilled shortly after, from
+        # the memory footprint of multiple concurrent inferences stacking
+        # up. This lock keeps inference calls serialized while still letting
+        # the caller's frame-receiving loop stay non-blocking.
+        self._infer_lock = asyncio.Lock()
 
         if not api_key:
             try:
@@ -77,19 +87,21 @@ class WhisperSTT(STTBackend):
             audio_data = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
             audio_data /= 32768.0  # Normalize
 
-            # Run in thread pool to avoid blocking
+            # Run in thread pool to avoid blocking, but only one inference
+            # at a time -- see _infer_lock comment in __init__.
             loop = asyncio.get_event_loop()
-            result = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: self.local_model.transcribe(
-                        audio_data,
-                        language=language if language != "auto" else None,
-                        fp16=False,
+            async with self._infer_lock:
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: self.local_model.transcribe(
+                            audio_data,
+                            language=language if language != "auto" else None,
+                            fp16=False,
+                        ),
                     ),
-                ),
-                timeout=30.0,
-            )
+                    timeout=30.0,
+                )
 
             # Whisper always includes "segments", but it's `[]` (not missing)
             # when no speech is detected in the phrase — `.get(..., [{}])`
