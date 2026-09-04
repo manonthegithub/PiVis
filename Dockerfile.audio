@@ -25,7 +25,7 @@ COPY pivis/web/static pivis/web/static
 # this list (and rebuild once) before pointing the ConfigMap at a new size.
 # Downloaded as appuser so the cache lands in its home dir, matching where
 # the app loads it from at runtime.
-ARG WHISPER_MODELS_TO_BAKE="tiny base small"
+ARG WHISPER_MODELS_TO_BAKE="tiny base small medium"
 RUN chown -R appuser:appuser /app
 USER appuser
 RUN for m in ${WHISPER_MODELS_TO_BAKE}; do \
