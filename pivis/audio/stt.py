@@ -95,7 +95,12 @@ class WhisperSTT(STTBackend):
         segments, info = self.local_model.transcribe(
             audio_data,
             language=language if language != "auto" else None,
-            beam_size=1,  # greedy-ish decode: favor latency over the last bit of accuracy
+            # whisper's own default is 5; greedy (1) traded accuracy for
+            # latency more than needed now that faster-whisper's baseline
+            # per-phrase time is already ~0.4-0.5s. User-reported accuracy
+            # issues (non-native accent) are exactly what beam search over
+            # greedy helps most with.
+            beam_size=5,
         )
         segments = list(segments)  # materialize the generator (this is where inference runs)
         text = "".join(s.text for s in segments).strip()
