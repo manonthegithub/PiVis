@@ -6,10 +6,45 @@ import struct
 from types import SimpleNamespace
 from unittest.mock import Mock, AsyncMock, patch
 
+import numpy as np
+
 from pivis.audio import AudioStreamHandler, AudioProcessor
+from pivis.audio.processor import VAD_CHUNK_SAMPLES
 from pivis.audio.stt import WhisperSTT, STTService
 from pivis.audio.llm_handler import LocalLLM, LLMService
 from pivis.audio.resilience import CircuitBreaker, CircuitBreakerConfig, RetryPolicy
+
+
+class FakeVAD:
+    """Stand-in for the real Silero VAD model in tests: classifies any
+    non-zero chunk as speech (high probability), any all-zero chunk as
+    silence (low probability). Neither faster-whisper nor onnxruntime are
+    installed in this test environment, and even where they are, tests
+    should control classification deterministically rather than depend on
+    a real neural net's judgment call on synthetic (non-speech-shaped)
+    test audio -- AudioProcessor's vad_model= constructor param exists
+    for exactly this."""
+
+    def __call__(self, samples: np.ndarray, num_samples: int = VAD_CHUNK_SAMPLES) -> np.ndarray:
+        n_chunks = len(samples) // num_samples
+        probs = []
+        for i in range(n_chunks):
+            chunk = samples[i * num_samples : (i + 1) * num_samples]
+            probs.append(0.9 if np.abs(chunk).max() > 1e-6 else 0.05)
+        return np.array(probs)
+
+
+def speech_chunk_bytes(amplitude: int = 10000) -> bytes:
+    """One VAD-chunk-sized (512 samples @ 16kHz = 32ms) constant-amplitude
+    "speech" PCM chunk -- FakeVAD classifies any non-zero chunk as speech,
+    so the actual waveform shape doesn't matter here, just non-zero."""
+    return struct.pack(f"<{VAD_CHUNK_SAMPLES}h", *([amplitude] * VAD_CHUNK_SAMPLES))
+
+
+def silence_chunk_bytes() -> bytes:
+    """One VAD-chunk-sized all-zero PCM chunk -- FakeVAD classifies this
+    as silence."""
+    return struct.pack(f"<{VAD_CHUNK_SAMPLES}h", *([0] * VAD_CHUNK_SAMPLES))
 
 
 class TestAudioProcessor:
@@ -19,42 +54,45 @@ class TestAudioProcessor:
         """Test processor initialization."""
         processor = AudioProcessor(
             sample_rate=16000,
-            frame_duration_ms=20,
-            silence_threshold=0.02,
+            frame_duration_ms=32,
+            silence_threshold=0.5,
+            vad_model=FakeVAD(),
         )
 
         assert processor.sample_rate == 16000
-        assert processor.frame_duration_ms == 20
-        assert processor.silence_threshold == 0.02
+        assert processor.frame_duration_ms == 32
+        assert processor.silence_threshold == 0.5
+        assert processor.frame_size == VAD_CHUNK_SAMPLES
 
-    def test_rms_calculation(self):
-        """Test RMS amplitude calculation."""
-        processor = AudioProcessor()
+    def test_rejects_non_16khz_or_mismatched_frame_duration(self):
+        """Regression guard: Silero VAD's 512-sample native chunk size
+        only lines up with 32ms at 16kHz. A silent mismatch here would
+        make process_frame feed VAD incorrectly-sized/calibrated input."""
+        with pytest.raises(ValueError):
+            AudioProcessor(sample_rate=8000, vad_model=FakeVAD())
+        with pytest.raises(ValueError):
+            AudioProcessor(frame_duration_ms=20, vad_model=FakeVAD())
 
-        # Create test audio: 1000 Hz sine wave (non-silence)
-        samples = struct.pack("<100h", *[int(32767 * 0.5) for _ in range(100)])
-        rms = processor._calculate_rms(samples)
+    def test_vad_classifies_speech_vs_silence(self):
+        """Test that VAD probability (not RMS amplitude) drives the
+        speech/silence classification that in_phrase transitions on."""
+        processor = AudioProcessor(vad_model=FakeVAD())
 
-        assert rms > 0.4  # Should be significant amplitude
-        assert rms < 0.6
+        result = processor.process_frame(speech_chunk_bytes(), "frame_1")
+        assert result is not None
+        # A single speech chunk isn't 450ms of trailing silence yet, so no
+        # phrase_complete, but in_phrase should now be True.
+        assert processor.in_phrase
 
-    def test_silence_detection(self):
-        """Test silence detection."""
-        processor = AudioProcessor(silence_threshold=0.02)
-
-        # Silent audio
-        silent_audio = struct.pack("<160h", *[0] * 160)
-        rms = processor._calculate_rms(silent_audio)
-
-        assert rms < processor.silence_threshold
+        processor2 = AudioProcessor(vad_model=FakeVAD())
+        processor2.process_frame(silence_chunk_bytes(), "frame_1")
+        assert not processor2.in_phrase
 
     def test_frame_processing(self):
         """Test frame processing and buffering."""
-        processor = AudioProcessor()
+        processor = AudioProcessor(vad_model=FakeVAD())
 
-        # Create test audio frame
-        audio_data = struct.pack("<160h", *[100] * 160)
-        result = processor.process_frame(audio_data, "frame_1")
+        result = processor.process_frame(speech_chunk_bytes(), "frame_1")
 
         assert result is not None
         assert result["frame_id"] == "frame_1"
@@ -62,13 +100,9 @@ class TestAudioProcessor:
 
     def test_processor_reset(self):
         """Test processor state reset."""
-        processor = AudioProcessor()
+        processor = AudioProcessor(vad_model=FakeVAD())
 
-        # Process some audio
-        audio_data = struct.pack("<160h", *[100] * 160)
-        processor.process_frame(audio_data, "frame_1")
-
-        # Reset
+        processor.process_frame(speech_chunk_bytes(), "frame_1")
         processor.reset()
 
         assert processor.frame_count == 0
@@ -82,15 +116,15 @@ class TestAudioProcessor:
         immediately after connecting never produced a phrase_complete event
         at all. Confirmed live via a real WebSocket test against the
         deployed audio module before this fix."""
-        processor = AudioProcessor(frame_duration_ms=20, min_silence_duration_ms=300)
-        speech_frame = struct.pack("<%dh" % processor.frame_size, *([10000] * processor.frame_size))
-        silence_frame = struct.pack("<%dh" % processor.frame_size, *([0] * processor.frame_size))
+        processor = AudioProcessor(min_silence_duration_ms=300, vad_model=FakeVAD())
+        speech_frame = speech_chunk_bytes()
+        silence_frame = silence_chunk_bytes()
 
         got_phrase = False
-        for i in range(10):  # ~200ms of speech, no silence beforehand
+        for i in range(7):  # ~224ms of speech, no silence beforehand
             result = processor.process_frame(speech_frame, f"speech-{i}")
             got_phrase |= any(f["type"] == "phrase_complete" for f in result["frames"])
-        for i in range(20):  # >300ms of trailing silence closes the phrase
+        for i in range(12):  # >300ms of trailing silence closes the phrase
             result = processor.process_frame(silence_frame, f"silence-{i}")
             got_phrase |= any(f["type"] == "phrase_complete" for f in result["frames"])
 

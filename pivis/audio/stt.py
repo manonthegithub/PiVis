@@ -118,15 +118,13 @@ class WhisperSTT(STTBackend):
             audio_data,
             language=language if language != "auto" else None,
             beam_size=self.beam_size,
-            # Without this, whisper always produces *some* text for the
-            # given audio duration even when there's no real speech --
-            # confirmed repeatedly in testing (pure tone/silence
-            # transcribed as "You", "Thanks for watching!", etc., each
-            # with a deceptively high confidence). VAD pre-screens for
-            # actual speech first; segments genuinely have no speech now
-            # come back empty rather than hallucinated, hitting the same
-            # empty-segments path already guarded below.
-            vad_filter=True,
+            # AudioProcessor (processor.py) now does VAD-based segmentation
+            # upstream of this call using the same Silero VAD model
+            # (shared singleton via functools.lru_cache) -- running VAD
+            # again here would be redundant work on audio that's already
+            # been speech-gated. If phrase segmentation is ever done
+            # without AudioProcessor's VAD path, turn this back on.
+            vad_filter=False,
         )
         segments = list(segments)  # materialize the generator (this is where inference runs)
         text = "".join(s.text for s in segments).strip()
