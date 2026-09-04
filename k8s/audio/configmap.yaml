@@ -5,10 +5,12 @@ metadata:
   namespace: pivis
 data:
   # Must be one of the sizes baked into the image (see Dockerfile.audio's
-  # WHISPER_MODELS_TO_BAKE build arg, currently "tiny base") -- HF_HUB_OFFLINE=1
-  # means an uncached size fails to load rather than downloading at startup.
-  # To switch: edit this value, then `kubectl rollout restart deployment/pivis-audio -n pivis`.
-  # No rebuild needed as long as the size is already baked in.
+  # WHISPER_MODELS_TO_BAKE build arg, currently "tiny base small") --
+  # HF_HUB_OFFLINE=1 means an uncached size fails to load rather than
+  # downloading at startup. To switch: edit this value, then
+  # `kubectl rollout restart deployment/pivis-audio -n pivis`. No rebuild
+  # needed as long as the size is already baked in. Measured on this
+  # hardware (ARM, int8): tiny ~0.6-0.9s/phrase, base ~22s/phrase.
   WHISPER_MODEL: "tiny"
   # Silence duration (ms) that closes out a phrase as a sentence boundary.
   # Was 300ms (split long sentences into too many segments); tried 600ms,
