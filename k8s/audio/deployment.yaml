@@ -34,7 +34,7 @@ spec:
           resources:
             requests:
               cpu: 250m
-              memory: 512Mi
+              memory: 768Mi
             limits:
               # Whisper transcription is CPU-bound; capping at 1 core made a
               # single real phrase take ~40s pinned at 100% (confirmed live)
@@ -42,7 +42,13 @@ spec:
               # hang. Node (babka) has 4 cores with only 2 allocated as
               # limits cluster-wide, so there's real headroom for this.
               cpu: "2"
-              memory: 1Gi
+              # Confirmed live: OOMKilled (exit 137) after ~9 min running the
+              # "small" model -- its footprint plus beam_size=5 decoding
+              # apparently spikes past 1Gi on some segments (tiny stayed
+              # comfortably under it). Node has 16GB with only 17% of memory
+              # allocated as limits cluster-wide, so there's real headroom;
+              # doubling rather than nudging since "large" may get tried too.
+              memory: 2Gi
           livenessProbe:
             httpGet:
               path: /healthz
