@@ -17,14 +17,20 @@ COPY pivis/audio_app.py pivis/audio_app.py
 COPY pivis/audio pivis/audio
 COPY pivis/web/static pivis/web/static
 
-# Bake the Whisper model into the image at build time so pods don't need
-# network access on startup. Downloaded as appuser so the cache lands in
-# its home dir, matching where the app loads it from at runtime.
-ARG WHISPER_MODEL=tiny
-ENV WHISPER_MODEL=${WHISPER_MODEL}
+# Bake every model size in WHISPER_MODELS_TO_BAKE into the image at build
+# time so pods don't need network access on startup -- and so switching
+# which one runs is just editing WHISPER_MODEL in
+# k8s/audio/configmap.yaml + `kubectl rollout restart`, not a rebuild.
+# HF_HUB_OFFLINE=1 below means only sizes baked in here are usable; add to
+# this list (and rebuild once) before pointing the ConfigMap at a new size.
+# Downloaded as appuser so the cache lands in its home dir, matching where
+# the app loads it from at runtime.
+ARG WHISPER_MODELS_TO_BAKE="tiny base"
 RUN chown -R appuser:appuser /app
 USER appuser
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"
+RUN for m in ${WHISPER_MODELS_TO_BAKE}; do \
+        python -c "from faster_whisper import WhisperModel; WhisperModel('$m', device='cpu', compute_type='int8')"; \
+    done
 
 # Set only after the bake step (which needs network to actually download the
 # model) -- confirmed live: without this, the model is baked in but

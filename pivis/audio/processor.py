@@ -16,7 +16,7 @@ class AudioProcessor:
         sample_rate: int = 16000,
         frame_duration_ms: int = 20,
         silence_threshold: float = 0.02,
-        min_silence_duration_ms: int = 600,
+        min_silence_duration_ms: int = 450,
     ):
         """Initialize audio processor.
 
@@ -25,15 +25,15 @@ class AudioProcessor:
             frame_duration_ms: Frame size in milliseconds
             silence_threshold: RMS amplitude threshold for silence detection
             min_silence_duration_ms: Minimum silence duration to consider phrase
-                boundary. Was 300ms; raised after user reports of long
-                sentences getting split into several segments -- normal
-                mid-sentence pauses (breaths, commas, brief hesitation)
-                routinely exceed 300ms, so most of those were being treated
-                as full sentence boundaries. Now that faster-whisper cut
-                inference to ~0.6-0.9s/phrase (down from ~2s), the
-                wait-for-silence portion is the bigger share of total
-                latency, so there's more room to raise this without hurting
-                perceived responsiveness.
+                boundary. This default is only used if AudioProcessor is
+                constructed without an explicit value -- audio_app.py always
+                passes MIN_SILENCE_DURATION_MS from the environment (see
+                k8s/audio/configmap.yaml), which is the actual live value
+                and the one worth tuning, not this default. History: 300ms
+                split long sentences into too many segments (normal
+                mid-sentence pauses routinely exceed 300ms); 600ms fixed
+                that but was reported to hurt accuracy; 450ms is a middle
+                ground.
         """
         self.sample_rate = sample_rate
         self.frame_duration_ms = frame_duration_ms

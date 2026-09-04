@@ -159,6 +159,7 @@ class TestSTTService:
         stt.model_name = "tiny"
         stt.api_key = None
         stt._infer_lock = asyncio.Lock()
+        stt.beam_size = 5
         stt.local_model = Mock()
         # faster-whisper returns (segments_generator, info), not a dict.
         stt.local_model.transcribe = Mock(return_value=(iter([]), SimpleNamespace(language="en")))
@@ -186,6 +187,7 @@ class TestSTTService:
         stt.model_name = "tiny"
         stt.api_key = None
         stt._infer_lock = asyncio.Lock()
+        stt.beam_size = 5
         stt.local_model = Mock()
 
         concurrent_calls = 0

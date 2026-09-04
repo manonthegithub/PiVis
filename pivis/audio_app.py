@@ -29,14 +29,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).parent / "web" / "static"
+# All three configurable from the k8s ConfigMap (k8s/audio/configmap.yaml)
+# without a rebuild -- just edit + `kubectl rollout restart`. WHISPER_MODEL
+# must be one of the sizes actually baked into the image (see
+# Dockerfile.audio's WHISPER_MODELS_TO_BAKE build arg) since HF_HUB_OFFLINE=1
+# means an uncached size fails to load rather than downloading at startup.
 _WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "tiny")
+_MIN_SILENCE_DURATION_MS = int(os.environ.get("MIN_SILENCE_DURATION_MS", "450"))
+_BEAM_SIZE = int(os.environ.get("BEAM_SIZE", "5"))
 
 app = FastAPI(title="PiVis Audio Module")
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 # Loaded once at import time (module download is baked into the image at
 # build time so pod startup doesn't need network access).
-stt_service = STTService(backend=WhisperSTT(model_name=_WHISPER_MODEL))
+stt_service = STTService(backend=WhisperSTT(model_name=_WHISPER_MODEL, beam_size=_BEAM_SIZE))
 
 # Per-stream framing/silence-detection state, keyed by stream_id.
 _processors: dict[str, AudioProcessor] = {}
@@ -77,7 +84,11 @@ async def _transcribe_and_reply(
 
 async def _on_frame(stream_id: str, frame: dict) -> None:
     processor = _processors.setdefault(
-        stream_id, AudioProcessor(sample_rate=frame.get("sample_rate", 16000))
+        stream_id,
+        AudioProcessor(
+            sample_rate=frame.get("sample_rate", 16000),
+            min_silence_duration_ms=_MIN_SILENCE_DURATION_MS,
+        ),
     )
     result = processor.process_frame(frame["audio_data"], frame["frame_id"])
     if not result:
@@ -119,7 +130,12 @@ async def index():
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok", "whisper_model": _WHISPER_MODEL}
+    return {
+        "status": "ok",
+        "whisper_model": _WHISPER_MODEL,
+        "min_silence_duration_ms": _MIN_SILENCE_DURATION_MS,
+        "beam_size": _BEAM_SIZE,
+    }
 
 
 @app.websocket("/ws/audio/{stream_id}")

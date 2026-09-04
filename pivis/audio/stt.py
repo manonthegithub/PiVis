@@ -24,15 +24,24 @@ class STTBackend(ABC):
 class WhisperSTT(STTBackend):
     """Whisper-based STT (local or API)."""
 
-    def __init__(self, model_name: str = "base", api_key: Optional[str] = None):
+    def __init__(
+        self, model_name: str = "base", api_key: Optional[str] = None, beam_size: int = 5
+    ):
         """Initialize Whisper STT.
 
         Args:
-            model_name: Whisper model size (tiny, base, small, medium, large)
+            model_name: Whisper model size (tiny, base, small, medium, large).
+                Must be one of the sizes actually baked into the image (see
+                Dockerfile.audio) since HF_HUB_OFFLINE=1 means an uncached
+                size fails to load rather than downloading at startup.
             api_key: OpenAI API key for cloud API (None = local model)
+            beam_size: whisper's own default is 5; greedy (1) trades
+                accuracy for latency. Configurable via BEAM_SIZE in
+                k8s/audio/configmap.yaml.
         """
         self.model_name = model_name
         self.api_key = api_key
+        self.beam_size = beam_size
         self.local_model = None
         # Whisper's model isn't safe for concurrent .transcribe() calls from
         # multiple threads -- confirmed live: overlapping phrases each ran
@@ -95,12 +104,7 @@ class WhisperSTT(STTBackend):
         segments, info = self.local_model.transcribe(
             audio_data,
             language=language if language != "auto" else None,
-            # whisper's own default is 5; greedy (1) traded accuracy for
-            # latency more than needed now that faster-whisper's baseline
-            # per-phrase time is already ~0.4-0.5s. User-reported accuracy
-            # issues (non-native accent) are exactly what beam search over
-            # greedy helps most with.
-            beam_size=5,
+            beam_size=self.beam_size,
         )
         segments = list(segments)  # materialize the generator (this is where inference runs)
         text = "".join(s.text for s in segments).strip()
