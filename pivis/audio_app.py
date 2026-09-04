@@ -45,7 +45,9 @@ _processors: dict[str, AudioProcessor] = {}
 _pending_tasks: dict[str, set] = {}
 
 
-async def _transcribe_and_reply(stream_id: str, websocket, audio_data: bytes) -> None:
+async def _transcribe_and_reply(
+    stream_id: str, websocket, audio_data: bytes, duration_ms: int
+) -> None:
     """Run STT and deliver the result, off the connection's receive loop.
 
     Whisper transcription is CPU-bound and can take tens of seconds on this
@@ -59,10 +61,14 @@ async def _transcribe_and_reply(stream_id: str, websocket, audio_data: bytes) ->
         transcription = await stt_service.transcribe_phrase(audio_data)
         if transcription.get("error"):
             await websocket.send_text(
-                json.dumps({"type": "error", "message": transcription["error"]})
+                json.dumps(
+                    {"type": "error", "message": transcription["error"], "duration_ms": duration_ms}
+                )
             )
         else:
-            await websocket.send_text(json.dumps({"type": "transcription", **transcription}))
+            await websocket.send_text(
+                json.dumps({"type": "transcription", "duration_ms": duration_ms, **transcription})
+            )
     except Exception as e:
         # Most likely the websocket closed while transcription was still
         # running -- nothing to deliver to, not worth an error log.
@@ -87,9 +93,15 @@ async def _on_frame(stream_id: str, frame: dict) -> None:
             continue
         # Tell the client transcription has started -- without this, a
         # 20-40s wait with zero messages is indistinguishable from a hang.
-        await websocket.send_text(json.dumps({"type": "processing"}))
+        # duration_ms exposes exactly where/how long each silence-detected
+        # segment is, so the sentence-splitting behavior is visible instead
+        # of a black box.
+        duration_ms = sub_frame.get("duration_ms", 0)
+        await websocket.send_text(
+            json.dumps({"type": "processing", "duration_ms": duration_ms})
+        )
         task = asyncio.create_task(
-            _transcribe_and_reply(stream_id, websocket, sub_frame["audio_data"])
+            _transcribe_and_reply(stream_id, websocket, sub_frame["audio_data"], duration_ms)
         )
         _pending_tasks.setdefault(stream_id, set()).add(task)
         task.add_done_callback(

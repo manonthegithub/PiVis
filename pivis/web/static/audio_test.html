@@ -43,11 +43,16 @@
         onError: (msg) => log(String(msg), true),
         onTranscription: (msg) => {
           statusEl.textContent = "recording";
-          log(msg.text || "(empty)");
+          log(`(${msg.duration_ms}ms segment) ${msg.text || "(empty)"}`);
         },
         // Whisper transcription can take tens of seconds on this hardware --
         // without this, that wait looks identical to the page being frozen.
-        onProcessing: () => { statusEl.textContent = "transcribing…"; },
+        // duration_ms is the detected segment length -- shows exactly where
+        // the silence-based sentence splitting is cutting.
+        onProcessing: (durationMs) => {
+          statusEl.textContent = "transcribing…";
+          log(`Segment split (${durationMs}ms), transcribing…`);
+        },
         // A dropped connection (server restart, network blip) used to kill
         // the stream for good with no way back short of reloading the page.
         onReconnecting: (attempt, max) => {

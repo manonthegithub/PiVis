@@ -144,7 +144,20 @@ class AudioClient {
     }
 
     const inputData = event.inputBuffer.getChannelData(0);
-    const pcmData = this.floatTo16BitPCM(inputData);
+    // The AudioContext was *asked* for this.sampleRate (16000), but
+    // browsers don't always honor that and can silently fall back to the
+    // hardware's native rate (commonly 48000) -- the frame was still
+    // labeled "sample_rate: 16000" regardless of what was actually
+    // captured. Whisper doesn't take a sample-rate argument at all; it
+    // always assumes exactly 16kHz internally. Mislabeled 48kHz audio
+    // would be heard compressed to 1/3 speed and pitch-shifted, which
+    // would produce badly wrong transcriptions -- so resample to the
+    // target rate here for real, instead of trusting the request was
+    // honored.
+    const actualRate = this.audioContext.sampleRate;
+    const resampled =
+      actualRate === this.sampleRate ? inputData : this.resampleTo(inputData, actualRate, this.sampleRate);
+    const pcmData = this.floatTo16BitPCM(resampled);
 
     // Send frame as JSON with base64 encoding
     const frame = {
@@ -162,6 +175,21 @@ class AudioClient {
     }
   }
 
+  resampleTo(float32Data, sourceRate, targetRate) {
+    if (sourceRate === targetRate) return float32Data;
+    const ratio = sourceRate / targetRate;
+    const newLength = Math.round(float32Data.length / ratio);
+    const result = new Float32Array(newLength);
+    for (let i = 0; i < newLength; i++) {
+      const srcIndex = i * ratio;
+      const srcFloor = Math.floor(srcIndex);
+      const srcCeil = Math.min(srcFloor + 1, float32Data.length - 1);
+      const frac = srcIndex - srcFloor;
+      result[i] = float32Data[srcFloor] * (1 - frac) + float32Data[srcCeil] * frac;
+    }
+    return result;
+  }
+
   handleServerMessage(event) {
     try {
       const message = JSON.parse(event.data);
@@ -176,7 +204,9 @@ class AudioClient {
         // Server accepted a phrase and started transcribing -- this can
         // take tens of seconds on constrained hardware, so surface it
         // instead of leaving the UI looking frozen with no feedback.
-        this.callbacks.onProcessing();
+        // duration_ms is the detected segment's length: exposes exactly
+        // where/how often the silence-based sentence splitting is firing.
+        this.callbacks.onProcessing(message.duration_ms);
       }
     } catch (error) {
       console.error("Failed to parse server message:", error);
